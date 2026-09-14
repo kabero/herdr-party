@@ -2,10 +2,13 @@
 """herdr-party-agents: Herdr のセッションを棒人間、space をパーティー会場の机として描画する。
 
 使い方:
-  herdr-party-agents [--all] [--interval SEC] [--list]
+  herdr-party-agents [--all] [--interval SEC] [--list] [--report] [--report-only [--once]]
     --all           claude 以外のエージェントも招待する
     --interval SEC  エージェント情報の更新間隔（秒、デフォルト 2）
     --list          棒人間ではなく一覧表示にする
+    --report        描画しつつ、各セッションのペインに名前とポーズをメタデータとして報告する
+                    （Herdr のサイドバーで $party_name / $party_pose として表示できる）
+    --report-only   画面を出さずに報告だけを続ける。--once で 1 回だけ報告して終了
 
 操作:
   マウス      棒人間に乗せるとタイトル、クリックでそのセッションを開く
@@ -498,7 +501,7 @@ def render_header(agents, view, inner_w):
     return lines
 
 
-HELP_TEXT = "←→ 選ぶ  Tab 要注意へ  Enter/クリック 開く  Esc 解除  q 終了"
+HELP_TEXT = "←→ 選ぶ  Tab 要注意  Enter 開く  Esc 解除  ? 閉じる  q 終了"
 
 
 def render_party(agents, workspaces, view, cols, rows_n):
@@ -563,6 +566,42 @@ def render_list(agents, view, cols, interval, kind_filter):
     lines.append("")
     lines.append(f"{fg(GRAY)}q: quit   {interval}s ごとに更新{RESET}")
     return lines
+
+
+# ---------- サイドバーへの報告 ----------
+
+SIDEBAR_POSES = {
+    "working": ["\\o/", "/o\\"],
+    "idle": [" o "],
+    "blocked": ["!o!", "?o?"],
+    "done": [" o/", "\\o "],
+    "unknown": [" ? "],
+}
+REPORT_TTL_MS = 8000
+
+
+def report_tokens(agents, names, frame):
+    """各セッションのペインに、名前とポーズを Herdr のメタデータとして報告する。"""
+    for a in agents:
+        st = a.get("agent_status", "unknown")
+        poses = SIDEBAR_POSES.get(st, SIDEBAR_POSES["unknown"])
+        pose = poses[frame % len(poses)]
+        herdr("pane", "report-metadata", a.get("pane_id", ""), "--source", "herdr-party",
+              "--token", f"party_name={names.get(guest_key(a), '')}",
+              "--token", f"party_pose={pose}",
+              "--ttl-ms", str(REPORT_TTL_MS))
+
+
+def report_only(kind_filter, interval, once):
+    frame = 0
+    while True:
+        fetched = fetch(kind_filter)
+        if fetched is not None:
+            report_tokens(fetched[0], assign_names(fetched[0]), frame)
+        frame += 1
+        if once:
+            return 0
+        time.sleep(interval)
 
 
 # ---------- 開く（フォーカス移動） ----------
@@ -635,6 +674,8 @@ def main():
     interval = 2.0
     kind_filter = "claude"
     mode = "party"
+    report = False
+    once = False
     while args:
         a = args.pop(0)
         if a == "--all":
@@ -643,12 +684,24 @@ def main():
             interval = float(args.pop(0)) if args else 2.0
         elif a == "--list":
             mode = "list"
+        elif a == "--report":
+            report = True
+        elif a == "--report-only":
+            mode = "report"
+        elif a == "--once":
+            once = True
         elif a in ("-h", "--help"):
             print(__doc__.strip())
             return 0
         else:
             print(f"unknown option: {a}", file=sys.stderr)
             return 2
+
+    if mode == "report":
+        try:
+            return report_only(kind_filter, interval, once)
+        except KeyboardInterrupt:
+            return 0
 
     if os.environ.get("HERDR_ENV") != "1":
         print("herdr-party-agents: Herdr のペイン内で実行してください (HERDR_ENV=1 が必要)", file=sys.stderr)
@@ -718,6 +771,8 @@ def main():
                     data = fetched
                     view.tracker.update(data[0])
                     view.names = assign_names(data[0])
+                    if report:
+                        threading.Thread(target=report_tokens, args=(data[0], view.names, view.frame), daemon=True).start()
                 last_fetch = now
             if mouse_resume_at is not None and time.monotonic() >= mouse_resume_at:
                 sys.stdout.write(MOUSE_ON)

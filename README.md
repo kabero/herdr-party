@@ -88,6 +88,25 @@ command = "/path/to/herdr-party/bin/herdr-party"
 | `?` | 操作の説明を出す / 消す |
 | `q` | 終了（ペインも閉じる） |
 
+## サイドバーに常駐させる
+
+ペインは space やタブを移動すると隠れます。どこにいても見えるようにするには、Herdr のサイドバーを使います。
+ビューアに `--report` を付けるか、画面なしの `--report-only` を動かすと、各セッションのペインに名前とポーズがメタデータとして報告されます。
+
+```bash
+./bin/herdr-party -- --report          # 会場のペインを開きつつサイドバーにも報告
+./bin/herdr-party-agents --report-only  # 画面なしで報告だけ（バックグラウンド向け）
+```
+
+`~/.config/herdr/config.toml` の agent 行に `$party_pose` と `$party_name` を足すと、サイドバーの各 agent に棒人間と名前が並びます。
+
+```toml
+[ui.sidebar.agents]
+rows = [["state_icon", "machine", "workspace", "tab"], ["$party_pose", "$party_name", "agent"]]
+```
+
+報告は 8 秒で失効するので、ビューアを止めればサイドバーは元に戻ります。
+
 ## 仕組みのメモ
 
 - ビューアは `herdr agent list` と `herdr workspace list` を 2 秒ごとに取得し、0.5 秒ごとに描画します。
