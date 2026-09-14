@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# herdr-party: 現在のタブの右側にペインを開き、Claude Code 一覧ビューアを起動する。
+#
+# 使い方:
+#   herdr-party [--width 0.3] [--focus] [-- <herdr-party-agents の引数...>]
+#     --width  右ペインの幅の割合（デフォルト 0.3）
+set -eu
+
+if [ "${HERDR_ENV:-}" != 1 ]; then
+  echo "herdr-party: Herdr のペイン内で実行してください (HERDR_ENV=1 が必要)" >&2
+  exit 1
+fi
+
+WIDTH=0.3
+FOCUS="--no-focus"
+VIEWER_ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --width) shift; WIDTH="$1" ;;
+    --focus) FOCUS="--focus" ;;
+    --) shift; VIEWER_ARGS=("$@"); break ;;
+    -h|--help) sed -n '2,7p' "$0"; exit 0 ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VIEWER="$SCRIPT_DIR/herdr-party-agents"
+
+# 右に分割。herdr の --ratio は元ペイン側の割合なので 1 - width を渡す。
+RATIO="$(awk -v w="$WIDTH" 'BEGIN { printf "%.3f", 1 - w }')"
+split_json="$(herdr pane split --current --direction right --ratio "$RATIO" --cwd "$PWD" "$FOCUS")"
+pane_id="$(printf '%s' "$split_json" | jq -r '.result.pane.pane_id')"
+[ -n "$pane_id" ] && [ "$pane_id" != "null" ] || { echo "herdr-party: ペイン分割に失敗: $split_json" >&2; exit 1; }
+
+herdr pane rename "$pane_id" "party" >/dev/null
+
+cmd="$(printf '%q ' "$VIEWER" "${VIEWER_ARGS[@]+"${VIEWER_ARGS[@]}"}")"
+herdr pane run "$pane_id" "exec $cmd" >/dev/null
+
+echo "$pane_id"

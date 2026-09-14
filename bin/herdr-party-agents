@@ -1,0 +1,593 @@
+#!/usr/bin/env python3
+"""herdr-party-agents: Herdr のセッションを棒人間、space をパーティー会場の机として描画する。
+
+使い方:
+  herdr-party-agents [--all] [--interval SEC] [--list]
+    --all           claude 以外のエージェントも招待する
+    --interval SEC  エージェント情報の更新間隔（秒、デフォルト 2）
+    --list          棒人間ではなく一覧表示にする
+  棒人間にマウスを乗せると、そのセッションのタイトルが吹き出しで出る
+  棒人間を左クリックすると、そのセッションのペインに Herdr のフォーカスが移る
+  机を左クリックすると、その space に Herdr のフォーカスが移る
+  q で終了
+"""
+import hashlib
+import json
+import os
+import re
+import select
+import shutil
+import subprocess
+import sys
+import time
+import unicodedata
+
+ESC = "\033"
+RESET = ESC + "[0m"
+BOLD = ESC + "[1m"
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]")
+MOUSE_RE = re.compile(rb"\x1b\[<(\d+);(\d+);(\d+)([Mm])")
+MOUSE_ON = ESC + "[?1003h" + ESC + "[?1006h"
+MOUSE_OFF = ESC + "[?1003l" + ESC + "[?1006l"
+
+
+def fg(n):
+    return f"{ESC}[38;5;{n}m"
+
+
+# パレット（256 色）
+PINK, CYAN, LAVENDER, MINT, PEACH, LEMON = 213, 117, 141, 121, 216, 228
+GRAY, SOFT = 245, 240
+STATUS_COLOR = {
+    "working": fg(LEMON),
+    "blocked": fg(210),
+    "done": fg(CYAN),
+    "idle": fg(MINT),
+    "unknown": fg(GRAY),
+}
+ICON = {"working": "◐", "blocked": "◆", "done": "✔", "idle": "●", "unknown": "?"}
+TABLE_PALETTE = [PINK, CYAN, LAVENDER, MINT, PEACH, LEMON]
+RAINBOW = [203, 209, 215, 221, 227, 155, 120, 86, 81, 75, 105, 141, 177, 213]  # 稼働中の棒人間を流れる虹色
+
+# 棒人間のポーズ。状態ごとにフレームを持ち、フレームが複数あるものはアニメーションする。
+FIGURES = {
+    "working": [["\\o/", " | ", "/ \\"], [" o ", "/|\\", "/ >"], ["\\o/", " | ", "< \\"], [" o ", "/|\\", "/ \\"]],
+    "idle": [[" o ", "/|\\", "/ \\"]],
+    "blocked": [["!o!", " | ", "/ \\"], ["?o?", " | ", "/ \\"]],
+    "done": [["\\o ", " |\\", "/ \\"], [" o/", "/| ", "/ \\"]],
+    "unknown": [[" ? ", "/|\\", "/ \\"]],
+}
+FIG_W = 3         # 棒人間の幅
+SEAT_W = 8        # 席の幅（名前 6 文字 + 隙間 2）
+BUBBLE_ROWS = 3   # 吹き出し用に空けておく行数（枠 2 + 本文 1）
+HALL_MARGIN = 2   # 会場の枠から机までの余白
+TABLE_FILL = 0.8  # 机の最低幅（会場の使える幅に対する割合）
+CLICK_DELAY = 1.2  # クリック後、Herdr クライアント自身のクリック確定処理が終わるのを待つ秒数
+MOUSE_RESUME_DELAY = 1.0  # 切り替え後、マウス追跡を再開するまでの秒数
+FOCUS_WATCH = 2.0  # 切り替え後、戻されていないか監視する秒数
+FOCUS_RETRIES = 3  # 戻されたときに切り替え直す最大回数
+
+# guest に付ける名前（ローマ字、6 文字以内）
+NAMES = [
+    "Taro", "Hanako", "Kenta", "Misaki", "Shota", "Yui", "Daiki", "Hina", "Yuto", "Aoi",
+    "Ren", "Rin", "Haruto", "Yuna", "Minato", "Mei", "Itsuki", "Sakura", "Yuma", "Riko",
+    "Asahi", "Mugi", "Sota", "An", "Riku", "Koharu", "Aoto", "Mio", "Ritsu", "Uta",
+    "Kaede", "Hotaru", "Haruka", "Subaru", "Hiro", "Natsu", "Haruki", "Kaho", "Akito", "Toma",
+    "Kaito", "Sora", "Hoshi", "Hikari", "Momoko", "Umeko", "Matsu", "Yuki", "Niji", "Suzu",
+    "Koto", "Ichiro", "Jiro", "Saburo", "Sayuri", "Shizu", "Take", "Akane", "Midori", "Asa",
+]
+
+
+def guest_key(a):
+    sess = a.get("agent_session") or {}
+    return sess.get("value") or a.get("terminal_id") or a.get("pane_id") or ""
+
+
+def assign_names(agents):
+    """セッション ID から決定的に名前を割り当てる。衝突したら次の名前へ。"""
+    names = {}
+    taken = set()
+    for a in sorted(agents, key=guest_key):
+        key = guest_key(a)
+        idx = int(hashlib.md5(key.encode()).hexdigest(), 16) % len(NAMES)
+        for _ in range(len(NAMES)):
+            if NAMES[idx] not in taken:
+                break
+            idx = (idx + 1) % len(NAMES)
+        names[key] = NAMES[idx]
+        taken.add(NAMES[idx])
+    return names
+
+
+# ---------- 文字幅ユーティリティ ----------
+
+def cw(ch):
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+
+
+def wlen(s):
+    """端末での表示幅（全角 = 2、ANSI は無視）。"""
+    return sum(cw(ch) for ch in ANSI_RE.sub("", s))
+
+
+def wtrunc(s, width):
+    """表示幅 width に切り詰める（「…」の幅も含めて width 以内）。"""
+    if wlen(s) <= width:
+        return s
+    if width <= 1:
+        return "…" if width == 1 else ""
+    out, w = "", 0
+    for ch in s:
+        c = cw(ch)
+        if w + c > width - 1:
+            break
+        out += ch
+        w += c
+    return out + "…"
+
+
+def wtrunc_ansi(s, width):
+    """ANSI を保ったまま表示幅 width に切り詰める。"""
+    out, w, i = "", 0, 0
+    while i < len(s):
+        m = ANSI_RE.match(s, i)
+        if m:
+            out += m.group(0)
+            i = m.end()
+            continue
+        c = cw(s[i])
+        if w + c > width:
+            break
+        out += s[i]
+        w += c
+        i += 1
+    return out + RESET
+
+
+def wcenter(s, width):
+    pad = max(0, width - wlen(s))
+    left = pad // 2
+    return " " * left + s + " " * (pad - left)
+
+
+def wljust(s, width):
+    return s + " " * max(0, width - wlen(s))
+
+
+def short_cwd(path):
+    home = os.path.expanduser("~")
+    if path and path.startswith(home):
+        return "~" + path[len(home):]
+    return path or "-"
+
+
+# ---------- herdr ----------
+
+def herdr(*args):
+    try:
+        out = subprocess.run(["herdr", *args], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if out.returncode != 0:
+        return None
+    try:
+        return json.loads(out.stdout)
+    except json.JSONDecodeError:
+        return None
+
+
+def fetch(kind_filter):
+    agents = herdr("agent", "list")
+    workspaces = herdr("workspace", "list")
+    if agents is None or workspaces is None:
+        return None
+    agents = agents["result"]["agents"]
+    if kind_filter:
+        agents = [a for a in agents if a.get("agent") == kind_filter]
+    agents.sort(key=lambda a: (a["workspace_id"], a["tab_id"], a["pane_id"]))
+    return agents, workspaces["result"]["workspaces"]
+
+
+def term_size():
+    size = shutil.get_terminal_size((80, 24))
+    return size.columns, size.lines
+
+
+# ---------- 描画 ----------
+
+def bubble(a, center_x, inner_w, tail_side):
+    """ホバー中の guest の吹き出し。会場の内側 (幅 inner_w) に収まる位置に置く。"""
+    st = a.get("agent_status", "unknown")
+    color = STATUS_COLOR.get(st, STATUS_COLOR["unknown"])
+    title = a.get("terminal_title_stripped") or a.get("terminal_title") or "-"
+    max_body = max(8, inner_w - HALL_MARGIN * 2 - 4)
+    body_w = min(max_body, wlen(title) + 2)
+    bw = body_w + 4
+    x = max(HALL_MARGIN, min(center_x - bw // 2, inner_w - HALL_MARGIN - bw))
+    tail = center_x - x - 1
+    top = ["─"] * (bw - 2)
+    bottom = ["─"] * (bw - 2)
+    if 0 <= tail < bw - 2:
+        if tail_side == "down":
+            bottom[tail] = "┬"
+        else:
+            top[tail] = "┴"
+    border = fg(SOFT)
+    line1 = color + ICON.get(st, "?") + RESET + " " + BOLD + wljust(wtrunc(title, body_w - 2), body_w - 2) + RESET
+    rows = [
+        border + "╭" + "".join(top) + "╮" + RESET,
+        border + "│" + RESET + " " + line1 + " " + border + "│" + RESET,
+        border + "╰" + "".join(bottom) + "╯" + RESET,
+    ]
+    return [" " * x + r for r in rows]
+
+
+def draw_guests(row, names, frame, above, x0, y0, inner_w, hover_key, hits):
+    """棒人間 1 列ぶん。x0 は席の左端（会場内側の x）、y0 は最初の行の body 行番号。
+
+    above=True なら吹き出し→名前→棒人間、False なら棒人間→名前→吹き出し。
+    hits に (x_from, x_to, y_from, y_to, guest) を追加する。
+    """
+    name_row = ""
+    fig_rows = ["", "", ""]
+    hovered = None
+    for i, a in enumerate(row):
+        st = a.get("agent_status", "unknown")
+        frames = FIGURES.get(st, FIGURES["unknown"])
+        f = frames[frame % len(frames)]
+        color = STATUS_COLOR.get(st, STATUS_COLOR["unknown"])
+        name = names[guest_key(a)]
+        name_cell = wcenter(name, SEAT_W - 2) + "  "
+        name_row += fg(GRAY) + name_cell + RESET
+        fig_x = (SEAT_W - 2 - FIG_W) // 2
+        for k in range(3):
+            if st == "working":
+                # 稼働中は 1 文字ごとに虹色をずらして光らせる
+                glyphs = "".join(
+                    (fg(RAINBOW[(frame * 2 + i * 3 + k * 2) % len(RAINBOW)]) + ch + RESET) if ch != " " else " "
+                    for i, ch in enumerate(f[k])
+                )
+            else:
+                glyphs = color + f[k] + RESET
+            fig_rows[k] += " " * fig_x + glyphs + " " * (SEAT_W - fig_x - FIG_W)
+        sx = x0 + i * SEAT_W
+        hits.append((sx - 1, sx + SEAT_W - 2, y0, y0 + BUBBLE_ROWS + 3, ("guest", a)))
+        if guest_key(a) == hover_key:
+            hovered = (a, sx + fig_x + 1)
+    if hovered is not None:
+        bubble_rows = bubble(hovered[0], hovered[1], inner_w, "down" if above else "up")
+    else:
+        bubble_rows = [""] * BUBBLE_ROWS
+    lead = " " * x0
+    figure_rows = [lead + name_row] + [lead + r for r in fig_rows]
+    return (bubble_rows + figure_rows) if above else (figure_rows + bubble_rows)
+
+
+def table_edge(left, right, inner, seats, color, joints=(), seat_x=0):
+    """机の縁。座席のある位置に皿 ○ を置き、joints の位置に脚の付け根 ┳ を置く。"""
+    chars = ["━"] * inner
+    for pos in joints:
+        if 0 <= pos < inner:
+            chars[pos] = "┳"
+    fig_x = (SEAT_W - 2 - FIG_W) // 2
+    for i in range(seats):
+        pos = seat_x + i * SEAT_W + fig_x + 1  # 棒人間の中心（机の内側基準）
+        if 0 <= pos < inner:
+            chars[pos] = "○"
+    return color + left + "".join(chars) + right + RESET
+
+
+def table_legs(inner, joints, color):
+    chars = [" "] * inner
+    for pos in joints:
+        if 0 <= pos < inner:
+            chars[pos] = "┃"
+    return color + " " + "".join(chars) + " " + RESET
+
+
+def render_table(ws_id, label, guests, names, frame, inner_w, color_n, focused_ws, y_base, hover_key, hits):
+    """机ひとつぶんの行を返す。y_base は body 内での開始行番号。"""
+    color = fg(color_n)
+    max_table_w = max(SEAT_W + 2, inner_w - HALL_MARGIN * 2)
+    min_table_w = int(max_table_w * TABLE_FILL)
+    table_w = min(max_table_w, max(min_table_w, wlen(label) + 4))
+    if len(guests) > 2 * max(1, (table_w - 2) // SEAT_W):
+        # 上下 2 列に収まらないなら机を会場いっぱいまで伸ばす
+        table_w = max_table_w
+    inner = table_w - 2
+    per_row = max(1, min(len(guests), inner // SEAT_W))
+    rows = [guests[i:i + per_row] for i in range(0, len(guests), per_row)]
+    offset = max(HALL_MARGIN, (inner_w - table_w) // 2)
+    pad = " " * offset
+
+    def seat_x(n):
+        # n 人ぶんの席を机の中央に寄せる（机の内側基準）
+        return max(0, (inner - (n * SEAT_W - 2)) // 2)
+
+    lines = [""]
+
+    def emit(row, above):
+        sx = seat_x(len(row))
+        out = draw_guests(row, names, frame, above, offset + 1 + sx, y_base + len(lines), inner_w, hover_key, hits)
+        lines.extend(out)
+        return sx
+
+    top_sx = emit(rows[0], True)
+    hits.append((offset, offset + table_w - 1, y_base + len(lines), y_base + len(lines) + 2, ("table", ws_id)))
+    lines.append(pad + table_edge("┏", "┓", inner, len(rows[0]), color, seat_x=top_sx))
+    deco = wcenter(wtrunc(label, inner), inner)
+    lines.append(pad + color + "┃" + RESET + (BOLD if focused_ws else "") + color + deco + RESET + color + "┃" + RESET)
+    if len(rows) > 1:
+        # 下側にも客が座る机は、下辺にも皿を並べる
+        lines.append(pad + table_edge("┗", "┛", inner, len(rows[1]), color, seat_x=seat_x(len(rows[1]))))
+        for i, row in enumerate(rows[1:]):
+            if i > 0:
+                lines.append("")
+            emit(row, False)
+    else:
+        joints = (1, inner - 2) if inner >= 4 else (0,)
+        lines.append(pad + table_edge("┗", "┛", inner, 0, color, joints=joints))
+        lines.append(pad + table_legs(inner, joints, color))
+    lines.append("")
+    return lines
+
+
+def render_party(agents, workspaces, frame, cols, rows_n, interval, kind_filter, hover_key):
+    """描画行と、ヒット判定用の矩形リストを返す。"""
+    inner_w = max(20, cols)
+    body = []
+    hits = []
+
+    clock = time.strftime("%H:%M:%S")
+    counts = {k: 0 for k in ICON}
+    for a in agents:
+        st = a.get("agent_status", "unknown")
+        counts[st] = counts.get(st, 0) + 1
+    stats = (
+        f"{fg(LEMON)}◐ {counts['working']} dancing{RESET}   "
+        f"{fg(210)}◆ {counts['blocked']} waiting{RESET}   "
+        f"{fg(MINT)}● {counts['idle'] + counts['done']} chilling{RESET}"
+    )
+    left = max(0, (inner_w - wlen(stats)) // 2)
+    gap = inner_w - left - wlen(stats) - wlen(clock) - 1
+    if gap < 1:
+        left = HALL_MARGIN
+        gap = inner_w - left - wlen(stats) - wlen(clock) - 1
+    if gap >= 1:
+        body.append(" " * left + stats + " " * gap + fg(SOFT) + clock + RESET)
+    else:
+        body.append(wcenter(stats, inner_w))
+    body.append(fg(SOFT) + "┈" * inner_w + RESET)
+
+    if not agents:
+        body.append("")
+        body.append(wcenter(fg(GRAY) + "( 会場に誰もいません )" + RESET, inner_w))
+    else:
+        ws_label = {w["workspace_id"]: w.get("label") or w["workspace_id"] for w in workspaces}
+        ws_order = {w["workspace_id"]: w.get("number", 0) for w in workspaces}
+        ws_focused = {w["workspace_id"]: bool(w.get("focused")) for w in workspaces}
+        by_ws = {}
+        for a in agents:
+            by_ws.setdefault(a["workspace_id"], []).append(a)
+        names = assign_names(agents)
+        for idx, ws_id in enumerate(sorted(by_ws, key=lambda w: (ws_order.get(w, 0), w))):
+            color_n = TABLE_PALETTE[idx % len(TABLE_PALETTE)]
+            body.extend(render_table(ws_id, ws_label.get(ws_id, ws_id), by_ws[ws_id], names, frame, inner_w, color_n,
+                                     ws_focused.get(ws_id, False), len(body), hover_key, hits))
+
+    lines = [wljust(wtrunc_ansi(l, inner_w), inner_w) for l in body[:rows_n]]
+    return lines, hits
+
+
+def hit_test(hits, col, row):
+    """端末座標 (1 始まり) から guest を探す。body は画面左上 (1,1) から始まる。"""
+    x = col - 1
+    y = row - 1
+    for x0, x1, y0, y1, target in hits:
+        if x0 <= x <= x1 and y0 <= y <= y1:
+            return target
+    return None
+
+
+def hover_target(hits, col, row):
+    t = hit_test(hits, col, row)
+    if t is not None and t[0] == "guest":
+        return guest_key(t[1])
+    return None
+
+
+def render_list(agents, cols, interval, kind_filter):
+    lines = [f"{fg(SOFT)}{time.strftime('%H:%M:%S')}{RESET}", fg(SOFT) + "─" * cols + RESET]
+    names = assign_names(agents)
+    for a in agents:
+        st = a.get("agent_status", "unknown")
+        color = STATUS_COLOR.get(st, STATUS_COLOR["unknown"])
+        title = a.get("terminal_title_stripped") or a.get("terminal_title") or "-"
+        mark = BOLD + "▶ " + RESET if a.get("focused") else "  "
+        lines.append(f"{mark}{color}{ICON.get(st, '?')}{RESET} {BOLD}{names[guest_key(a)]}{RESET}  {title}")
+        extra = f"  {fg(GRAY)}{a.get('agent')}{RESET}" if not kind_filter else ""
+        lines.append(f"    {fg(GRAY)}{a['workspace_id']} · {a['pane_id']}{RESET}  {color}{st}{RESET}{extra}")
+        lines.append(f"    {fg(SOFT)}{short_cwd(a.get('cwd'))}{RESET}")
+    if not agents:
+        lines.append(f"{fg(GRAY)}(エージェントが見つかりません){RESET}")
+    lines.append("")
+    lines.append(f"{fg(GRAY)}q: quit   {interval}s ごとに更新{RESET}")
+    return lines
+
+
+# ---------- メインループ ----------
+
+def parse_input(data):
+    """入力バイト列から (終了要求か, 最後のマウス座標, 左クリックした座標のリスト) を返す。"""
+    quit_req = False
+    pos = None
+    clicks = []
+    for m in MOUSE_RE.finditer(data):
+        button = int(m.group(1))
+        pos = (int(m.group(2)), int(m.group(3)))
+        # 左ボタンを離したときをクリックとみなす。押下で動くと、Herdr 自身の
+        # 「クリックしたペインをフォーカスする」処理が後から走って元に戻されてしまう。
+        if button == 0 and m.group(4) == b"m":
+            clicks.append(pos)
+    rest = MOUSE_RE.sub(b"", data)
+    if b"q" in rest or b"Q" in rest:
+        quit_req = True
+    return quit_req, pos, clicks
+
+
+def debug(msg):
+    path = os.environ.get("HERDR_PARTY_LOG")
+    if path:
+        with open(path, "a") as f:
+            f.write(time.strftime("%H:%M:%S ") + msg + "\n")
+
+
+def open_guest(hits, col, row):
+    """クリックされた guest のペインに Herdr のフォーカスを移す。"""
+    target = hit_test(hits, col, row)
+    debug(f"click col={col} row={row} -> {target and target[0]}")
+    if target is None:
+        return None
+    # マウス追跡を一時的に切る。追跡中は Herdr クライアントがマウスの動きを
+    # このペインに転送するたびにこのペインをフォーカスし直すので、切り替えが戻されてしまう。
+    sys.stdout.write(MOUSE_OFF)
+    sys.stdout.flush()
+    time.sleep(CLICK_DELAY)  # Herdr 側のクリック処理（ペインのフォーカス）が終わるのを待つ
+    if target[0] == "guest":
+        res = herdr("agent", "focus", target[1].get("pane_id", ""))
+        want_ws = target[1].get("workspace_id")
+    else:
+        res = herdr("workspace", "focus", target[1])
+        want_ws = target[1]
+    debug(f"focus -> {'ok' if res else res}")
+    # Herdr クライアントがクリック直後に元の space へ戻すことがあるので、
+    # しばらく監視して戻されていたらもう一度だけ切り替える。
+    if res and want_ws and want_ws != os.environ.get("HERDR_WORKSPACE_ID"):
+        started = time.monotonic()
+        retries = 0
+        while time.monotonic() - started < FOCUS_WATCH:
+            time.sleep(0.1)
+            ws = herdr("workspace", "list")
+            if not ws:
+                continue
+            cur = next((w["workspace_id"] for w in ws["result"]["workspaces"] if w.get("focused")), None)
+            if cur == want_ws:
+                continue
+            if retries >= FOCUS_RETRIES:
+                debug(f"still {cur} after {retries} retries")
+                break
+            retries += 1
+            debug(f"bounced back to {cur} at +{time.monotonic() - started:.2f}s; refocusing {want_ws} (retry {retries})")
+            if target[0] == "guest":
+                herdr("agent", "focus", target[1].get("pane_id", ""))
+            else:
+                herdr("workspace", "focus", want_ws)
+    return time.monotonic() + MOUSE_RESUME_DELAY
+
+
+def main():
+    args = sys.argv[1:]
+    interval = 2.0
+    kind_filter = "claude"
+    mode = "party"
+    while args:
+        a = args.pop(0)
+        if a == "--all":
+            kind_filter = ""
+        elif a == "--interval":
+            interval = float(args.pop(0)) if args else 2.0
+        elif a == "--list":
+            mode = "list"
+        elif a in ("-h", "--help"):
+            print(__doc__.strip())
+            return 0
+        else:
+            print(f"unknown option: {a}", file=sys.stderr)
+            return 2
+
+    if os.environ.get("HERDR_ENV") != "1":
+        print("herdr-party-agents: Herdr のペイン内で実行してください (HERDR_ENV=1 が必要)", file=sys.stderr)
+        return 1
+
+    is_tty = sys.stdin.isatty()
+    old_attrs = None
+    fd = sys.stdin.fileno()
+    if is_tty:
+        import termios
+        import tty
+        old_attrs = termios.tcgetattr(fd)
+        tty.setcbreak(fd)
+    sys.stdout.write(ESC + "[?25l")
+    if is_tty and mode == "party":
+        sys.stdout.write(MOUSE_ON)
+    sys.stdout.flush()
+
+    tick = 0.5 if mode == "party" else interval
+    data = None
+    last_fetch = 0.0
+    frame = 0
+    hover_key = None
+    hits = []
+    mouse_resume_at = None
+    try:
+        while True:
+            now = time.monotonic()
+            if data is None or now - last_fetch >= interval:
+                fetched = fetch(kind_filter)
+                if fetched is not None:
+                    data = fetched
+                last_fetch = now
+            if mouse_resume_at is not None and time.monotonic() >= mouse_resume_at:
+                sys.stdout.write(MOUSE_ON)
+                mouse_resume_at = None
+            cols, rows_n = term_size()
+            if data is None:
+                lines = [f"{STATUS_COLOR['blocked']}herdr agent list に失敗しました{RESET}"]
+            elif mode == "party":
+                lines, hits = render_party(data[0], data[1], frame, cols, rows_n, int(interval), kind_filter, hover_key)
+            else:
+                lines = render_list(data[0], cols, int(interval), kind_filter)
+            sys.stdout.write(ESC + "[H" + ESC + "[2J" + "\n".join(lines[:rows_n]))
+            sys.stdout.flush()
+            frame += 1
+            if not is_tty:
+                time.sleep(tick)
+                continue
+            # tick まで入力を待つ。ホバー先が変わったらすぐ描き直す
+            deadline = time.monotonic() + tick
+            while True:
+                remain = deadline - time.monotonic()
+                if remain <= 0:
+                    break
+                r, _, _ = select.select([fd], [], [], remain)
+                if not r:
+                    break
+                raw = os.read(fd, 4096)
+                quit_req, pos, clicks = parse_input(raw)
+                if clicks:
+                    debug(f"raw={raw!r} clicks={clicks}")
+                if quit_req:
+                    return 0
+                for c in clicks:
+                    resume = open_guest(hits, c[0], c[1])
+                    if resume is not None:
+                        mouse_resume_at = resume
+                if pos is not None:
+                    new_key = hover_target(hits, pos[0], pos[1])
+                    if new_key != hover_key:
+                        hover_key = new_key
+                        frame -= 1  # ポーズを進めずに描き直す
+                        break
+    except KeyboardInterrupt:
+        pass
+    finally:
+        sys.stdout.write(MOUSE_OFF + ESC + "[?25h" + RESET + "\n")
+        sys.stdout.flush()
+        if old_attrs is not None:
+            import termios
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
