@@ -334,13 +334,13 @@ class View:
 def wide_bubble(a, center_x, inner_w, tail_side, view):
     """ホバー中／選択中の guest の吹き出し。会場の内側 (幅 inner_w) に収まる位置に置く。
 
-    1 行目: 状態・タイトル・経過時間・最後に見てからの時間
+    1 行目: 状態・名前・経過時間・最後に見てからの時間
     2 行目: 最後に頼んだこと（❯）
     3 行目: 最後の応答の冒頭（⏺）か、承認待ちの内容
     """
     st = a.get("agent_status", "unknown")
     color = STATUS_COLOR.get(st, STATUS_COLOR["unknown"])
-    title = a.get("terminal_title_stripped") or a.get("terminal_title") or "-"
+    title = view.names.get(guest_key(a), "")
     elapsed = view.tracker.elapsed(a)
     seen = view.last_seen.get(a.get("pane_id"))
     tail_bits = []
