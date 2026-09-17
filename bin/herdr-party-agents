@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""herdr-party-agents: Herdr のセッションを棒人間、space をパーティー会場の机として描画する。
+"""herdr-party-agents: Herdr のセッションを棒人間、space をパーティー会場のステージとして描画する。
 
 使い方:
   herdr-party-agents [--all] [--interval SEC] [--list] [--report] [--report-only [--once]]
@@ -74,8 +74,8 @@ FIGURES = {
 FIG_W = 3         # 棒人間の幅
 SEAT_W = 8        # 席の幅（名前 6 文字 + 隙間 2）
 BUBBLE_ROWS = 3   # 吹き出し用に空けておく行数
-HALL_MARGIN = 2   # 会場の端から机までの余白
-TABLE_FILL = 0.8  # 机の最低幅（会場の使える幅に対する割合）
+HALL_MARGIN = 2   # 会場の端からステージまでの余白
+TABLE_FILL = 0.8  # ステージの最低幅（会場の使える幅に対する割合）
 # クリック後、切り替えるまでの待ち。Herdr 0.9.0 以前はクライアントがクリックしたペインの
 # space へ引き戻す癖があるので長めに待つ。0.9.1 で修正済み（changelog #3760 #4153 #4171）。
 CLICK_DELAY_OLD = 1.2
@@ -406,71 +406,53 @@ def draw_guests(row, view, inner_w, above, x0, y0):
     return (bubble_rows + figure_rows) if above else (figure_rows + bubble_rows)
 
 
-def table_edge(left, right, inner, row, color, joints=(), seat_x=0):
-    """机の縁。座席のある位置に皿 ○（自分のいるセッションは ◉）を置き、joints の位置に脚の付け根 ┳ を置く。"""
+def stage_edge(inner, row, color, seat_x=0):
+    """ステージの縁。自分のいるセッションの立ち位置に ◉ を置く。"""
     chars = ["━"] * inner
-    for pos in joints:
-        if 0 <= pos < inner:
-            chars[pos] = "┳"
     fig_x = (SEAT_W - 2 - FIG_W) // 2
     for i, a in enumerate(row):
-        pos = seat_x + i * SEAT_W + fig_x + 1  # 棒人間の中心（机の内側基準）
-        if 0 <= pos < inner:
-            chars[pos] = "◉" if a.get("focused") else "○"
-    return color + left + "".join(chars) + right + RESET
+        if a.get("focused"):
+            pos = seat_x + i * SEAT_W + fig_x + 1  # 棒人間の中心（縁の内側基準）
+            if 0 <= pos < inner:
+                chars[pos] = "◉"
+    return color + "┏" + "".join(chars) + "┓" + RESET
 
 
-def table_legs(inner, joints, color):
-    chars = [" "] * inner
-    for pos in joints:
-        if 0 <= pos < inner:
-            chars[pos] = "┃"
-    return color + " " + "".join(chars) + " " + RESET
+def render_stage(ws_id, label, guests, view, inner_w, color_n, focused_ws, y_base):
+    """ステージひとつぶんの行を返す。y_base は body 内での開始行番号。
 
-
-def render_table(ws_id, label, guests, view, inner_w, color_n, focused_ws, y_base):
-    """机ひとつぶんの行を返す。y_base は body 内での開始行番号。"""
+    棒人間はステージの上に立つ。1 列に収まらないぶんは後ろの列（上側）に並ぶ。
+    ステージは台形: 上辺が縁、前面にスペース名、底に床のライン。
+    """
     color = fg(color_n)
-    max_table_w = max(SEAT_W + 2, inner_w - HALL_MARGIN * 2)
-    min_table_w = int(max_table_w * TABLE_FILL)
-    table_w = min(max_table_w, max(min_table_w, wlen(label) + 4))
-    if len(guests) > 2 * max(1, (table_w - 2) // SEAT_W):
-        # 上下 2 列に収まらないなら机を会場いっぱいまで伸ばす
-        table_w = max_table_w
-    inner = table_w - 2
+    max_stage_w = max(SEAT_W + 2, inner_w - HALL_MARGIN * 2)  # 底辺は左右に 2 ずつ広がる
+    min_stage_w = int(max_stage_w * TABLE_FILL)
+    stage_w = min(max_stage_w, max(min_stage_w, wlen(label) + 6))
+    if len(guests) > max(1, (stage_w - 2) // SEAT_W):
+        # 1 列に収まらないなら会場いっぱいまで広げる
+        stage_w = max_stage_w
+    inner = stage_w - 2
     per_row = max(1, min(len(guests), inner // SEAT_W))
     rows = [guests[i:i + per_row] for i in range(0, len(guests), per_row)]
-    offset = max(HALL_MARGIN, (inner_w - table_w) // 2)
+    offset = max(HALL_MARGIN, (inner_w - stage_w) // 2)
     pad = " " * offset
 
     def seat_x(n):
-        # n 人ぶんの席を机の中央に寄せる（机の内側基準）
+        # n 人ぶんの立ち位置をステージの中央に寄せる（縁の内側基準）
         return max(0, (inner - (n * SEAT_W - 2)) // 2)
 
     lines = []
-
-    def emit(row, above):
-        sx = seat_x(len(row))
-        lines.extend(draw_guests(row, view, inner_w, above, offset + 1 + sx, y_base + len(lines)))
-        return sx
-
-    top_sx = emit(rows[0], True)
-    view.hits.append((offset, offset + table_w - 1, y_base + len(lines), y_base + len(lines) + 2, ("table", ws_id)))
-    lines.append(pad + table_edge("┏", "┓", inner, rows[0], color, seat_x=top_sx))
+    # 後ろの列から描く（上に行くほど後ろ）
+    for row in reversed(rows[1:]):
+        lines.extend(draw_guests(row, view, inner_w, True, offset + 1 + seat_x(len(row)), y_base + len(lines)))
+    front_sx = seat_x(len(rows[0]))
+    lines.extend(draw_guests(rows[0], view, inner_w, True, offset + 1 + front_sx, y_base + len(lines)))
+    view.hits.append((offset - 2, offset + stage_w + 1, y_base + len(lines), y_base + len(lines) + 2, ("table", ws_id)))
+    lines.append(pad + stage_edge(inner, rows[0], color, seat_x=front_sx))
     deco = wcenter(wtrunc(label, inner), inner)
-    lines.append(pad + color + "┃" + RESET + (BOLD if focused_ws else "") + color + deco + RESET + color + "┃" + RESET)
-    if len(rows) > 1:
-        # 下側にも客が座る机は、下辺にも皿を並べる
-        lines.append(pad + table_edge("┗", "┛", inner, rows[1], color, seat_x=seat_x(len(rows[1]))))
-        for i, row in enumerate(rows[1:]):
-            if i > 0:
-                lines.append("")
-            emit(row, False)
-    else:
-        joints = (1, inner - 2) if inner >= 4 else (0,)
-        lines.append(pad + table_edge("┗", "┛", inner, [], color, joints=joints))
-        lines.append(pad + table_legs(inner, joints, color))
-        lines.append("")
+    lines.append(" " * (offset - 1) + color + "╱ " + RESET + (BOLD if focused_ws else "") + color + deco + RESET + color + " ╲" + RESET)
+    lines.append(" " * (offset - 2) + color + "╱" + "_" * (inner + 4) + "╲" + RESET)
+    lines.append("")
     return lines
 
 
@@ -539,7 +521,7 @@ def render_party(agents, workspaces, view, cols, rows_n):
             by_ws.setdefault(a["workspace_id"], []).append(a)
         for idx, ws_id in enumerate(sorted(by_ws, key=lambda w: (ws_order.get(w, 0), w))):
             color_n = TABLE_PALETTE[idx % len(TABLE_PALETTE)]
-            body.extend(render_table(ws_id, ws_label.get(ws_id, ws_id), by_ws[ws_id], view, inner_w, color_n,
+            body.extend(render_stage(ws_id, ws_label.get(ws_id, ws_id), by_ws[ws_id], view, inner_w, color_n,
                                      ws_focused.get(ws_id, False), len(body)))
 
     lines = [wljust(wtrunc_ansi(l, inner_w), inner_w) for l in body]
