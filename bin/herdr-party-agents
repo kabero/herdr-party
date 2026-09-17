@@ -489,21 +489,37 @@ def draw_guests(row, view, inner_w, above, x0, y0, lead_x=None, lobby=False, sea
     return (bubble_rows + figure_rows) if above else (figure_rows + bubble_rows)
 
 
-def stage_top(inner, row, color, seat_x=0, seat_w=SEAT_W):
-    """ステージの天面。自分のいるセッションの足元は明るくしてスポットライトにする。"""
+def platform_row(inner, color, spots, label, label_style):
+    """台の行。spots（スポットライトの位置）を避けて label を埋め込む。"""
     cells = [color + "▄" + RESET] * inner
-    fig_x = (seat_w - 2 - FIG_W) // 2
-    for i, a in enumerate(row):
-        if a.get("focused"):
-            center = seat_x + i * seat_w + fig_x + 1
-            for pos in range(center - 2, center + 3):
-                if 0 <= pos < inner:
-                    cells[pos] = fg(LEMON) + "▄" + RESET
+    for pos in spots:
+        if 0 <= pos < inner:
+            cells[pos] = fg(LEMON) + "▄" + RESET
+    if label:
+        text = " " + label + " "
+        w = wlen(text)
+        if w <= inner:
+            candidates = [(inner - w) // 2, 1, inner - w - 1]
+            x = next((c for c in candidates if c >= 0 and not any(c <= p < c + w for p in spots)), candidates[0])
+            x = max(0, min(x, inner - w))
+            i = x
+            for ch in text:
+                cells[i] = label_style + ch + RESET
+                if cw(ch) == 2:
+                    cells[i + 1] = ""
+                i += cw(ch)
     return "".join(cells)
 
 
-PROMPT_LINES = 2  # 投げたプロンプトを何行まで出すか
-REPLY_LINES = 2   # 返答を何行まで出すか
+def stage_top(inner, row, color, seat_x=0, seat_w=SEAT_W, label="", label_style=""):
+    """ステージの天面。自分のいるセッションの足元を明るくし、space 名を埋め込む。"""
+    fig_x = (seat_w - 2 - FIG_W) // 2
+    spots = set()
+    for i, a in enumerate(row):
+        if a.get("focused"):
+            center = seat_x + i * seat_w + fig_x + 1
+            spots.update(range(center - 2, center + 3))
+    return platform_row(inner, color, spots, label, label_style)
 
 
 def wwrap(s, width, max_lines):
@@ -624,16 +640,17 @@ def render_stage(ws_id, label, guests, view, inner_w, color_n, focused_ws, y_bas
         if info and (info["repo"], info["branch"]) not in [(i["repo"], i["branch"]) for i in seen]:
             seen.append(info)
     git_txt = "  ".join(git_summary(i) for i in seen)
-    head = (BOLD if focused_ws else "") + color + wtrunc(label, inner) + RESET
-    if git_txt and wlen(head) + 2 + wlen(git_txt) <= inner:
-        head += "  " + git_txt
+    head = wtrunc(label, inner - 2)
+    plain_git = ANSI_RE.sub("", git_txt)
+    if plain_git and wlen(head) + 2 + wlen(plain_git) <= inner - 2:
+        head += "  " + plain_git
     for row in reversed(rows[1:]):
         lines.extend(draw_guests(row, view, inner_w, True, offset + 1 + seat_x(len(row)), y_base + len(lines), seat_w=seat_w))
     front_sx = seat_x(len(rows[0]))
     lines.extend(draw_guests(rows[0], view, inner_w, True, offset + 1 + front_sx, y_base + len(lines), seat_w=seat_w))
-    view.hits.append((offset, offset + stage_w - 1, y_base + len(lines), y_base + len(lines) + 1, ("table", ws_id)))
-    lines.append(pad + " " + stage_top(inner, rows[0], color, seat_x=front_sx, seat_w=seat_w))
-    lines.append(pad + " " + wcenter(head, inner))
+    view.hits.append((offset, offset + stage_w - 1, y_base + len(lines), y_base + len(lines), ("table", ws_id)))
+    lines.append(pad + " " + stage_top(inner, rows[0], color, seat_x=front_sx, seat_w=seat_w,
+                                       label=head, label_style=(BOLD if focused_ws else "") + color))
     lines.extend(caption_rows(rows[0], view, seat_w, offset + 1 + front_sx))
     lines.append("")
     return lines
@@ -702,18 +719,14 @@ def render_shared_stage(name, sections, view, inner_w, color_n, y_base):
         lines.append(row)
     for (x, w), (_, ws_id, _, _) in zip(spans, sections):
         view.hits.append((offset + 1 + x, offset + 1 + x + w - 1, y_base + len(lines), y_base + len(lines) + 1, ("table", ws_id)))
-    cells = [color + "▄" + RESET] * inner
     fig_x = (seat_w - 2 - FIG_W) // 2
+    spots = set()
     for (x, _), (_, _, _, guests) in zip(spans, sections):
         for i, a in enumerate(guests):
             if a.get("focused"):
                 center = x + i * seat_w + fig_x + 1
-                for pos in range(center - 2, center + 3):
-                    if 0 <= pos < inner:
-                        cells[pos] = fg(LEMON) + "▄" + RESET
-    lines.append(pad + " " + "".join(cells))
-    view.hits.append((offset, offset + stage_w - 1, y_base + len(lines), y_base + len(lines), ("table", sections[0][1])))
-    lines.append(pad + " " + wcenter((BOLD if any_focused else "") + color + wtrunc(name, inner) + RESET, inner))
+                spots.update(range(center - 2, center + 3))
+    lines.append(pad + " " + platform_row(inner, color, spots, wtrunc(name, inner - 2), (BOLD if any_focused else "") + color))
     labels = [((BOLD if f else "") + t + RESET) for t, _, f, _ in sections]
     lines.append(pad + " " + place_labels(spans, labels, inner))
     # 足元のキャプション（区画ごとに列を合わせる）
