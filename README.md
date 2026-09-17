@@ -21,9 +21,40 @@
           ┃                                        ┃
 ```
 
+## インストール
+
+Herdr のプラグインとして登録します。ローカルの checkout をリンクする場合:
+
+```bash
+git clone https://github.com/kabero/herdr-party ~/ghq/github.com/kabero/herdr-party
+herdr plugin link ~/ghq/github.com/kabero/herdr-party
+herdr plugin action list --plugin kabe.herdr-party
+```
+
+GitHub から直接入れる場合は `herdr plugin install kabero/herdr-party` です。
+
+プレフィックスキーに割り当てるには `~/.config/herdr/config.toml` に追加して `herdr server reload-config` します。
+
+```toml
+[[keys.command]]
+key = "prefix+alt+p"
+type = "plugin_action"
+command = "kabe.herdr-party.toggle"
+description = "party pane"
+```
+
+プラグインが提供するもの:
+
+| 種類 | id | 動き |
+| --- | --- | --- |
+| action | `kabe.herdr-party.toggle` | 現在のタブの右側に会場を開く。開いていれば閉じる |
+| action | `kabe.herdr-party.open` / `close` | 開くだけ / 閉じるだけ |
+| pane | `party` | Herdr 管理のペインとして開く（`herdr plugin pane open --plugin kabe.herdr-party --entrypoint party --placement split`） |
+| pane | `peek` | ポップアップで会場を覗く（`--entrypoint peek`、`q` で閉じる） |
+
 ## 使い方
 
-Herdr のペイン内（`HERDR_ENV=1`）で実行します。
+プラグインを使わずに、Herdr のペイン内（`HERDR_ENV=1`）で直接実行することもできます。
 
 ```bash
 ./bin/herdr-party            # 右側に幅 30% のペインを開く。すでに開いていれば閉じる（トグル）
@@ -36,17 +67,6 @@ Herdr のペイン内（`HERDR_ENV=1`）で実行します。
 ```
 
 依存: `herdr`, `jq`（ランチャー）, `python3`（ビューア、標準ライブラリのみ）
-
-### キーバインドに登録する
-
-`~/.config/herdr/config.toml` に追加すると、プレフィックスキー一発で出し入れできます。
-
-```toml
-[[keys.command]]
-key = "prefix+alt+p"
-type = "shell"
-command = "/path/to/herdr-party/bin/herdr-party"
-```
 
 ## 見方
 
@@ -111,7 +131,7 @@ rows = [["state_icon", "machine", "workspace", "tab"], ["$party_pose", "$party_n
 
 - ビューアは `herdr agent list` と `herdr workspace list` を 2 秒ごとに取得し、0.5 秒ごとに描画します。
 - xterm のマウス移動追跡（1003 モード）を有効にするので、Herdr の `mouse_capture` が有効でもホバーとクリックがペインに届きます。
-- Herdr クライアントはペインをクリックしたあと少し遅れてそのペインの space を再フォーカスすることがあります。クリックで開くときはボタンを離してから 1.2 秒待って切り替え、そのあと 2 秒間は戻されていないか監視して、戻されていたら切り替え直します。キーボードで開く場合はこの待ちがありません。
+- Herdr 0.9.0 以前のクライアントは、API で space を切り替えた直後にクリックしたペインの space へ引き戻すことがあります（0.9.1 で修正。changelog #3760 #4153 #4171）。0.9.0 以前ではボタンを離してから 1.2 秒待って切り替え、そのあと 2 秒間は戻されていないか監視して、戻されていたら切り替え直します。0.9.1 以降は待ちを 0.2 秒にしています。クリックで確実に移動したいなら `herdr update` で 0.9.1 以降にしてください。
 - 環境変数 `HERDR_PARTY_LOG` にファイルパスを入れて起動すると、クリックとフォーカスの経過がそのファイルに残ります。
 
 ## 今後のアイデア

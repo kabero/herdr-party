@@ -1,0 +1,44 @@
+# herdr-party: Herdr のセッションを棒人間、space を机として描くパーティー会場。
+# - toggle アクション: 現在のタブの右側に会場ペインを開く／閉じる（prefix キーに割り当てる用）
+# - party ペイン: Herdr 管理のペインとして開く用（herdr plugin pane open）
+# - peek ペイン: ポップアップで一瞬だけ会場を覗く用（q で閉じる）
+# 常駐なし。会場ペインの中でビューア（python3、標準ライブラリのみ）が 2 秒ごとに
+# agent list / workspace list を読む。
+id = "kabe.herdr-party"
+name = "Herdr Party"
+version = "0.2.0"
+min_herdr_version = "0.9.0"
+description = "Sessions as stick figures around per-space tables; hover for titles, click to jump"
+platforms = ["macos", "linux"]
+
+[[actions]]
+id = "toggle"
+title = "Toggle party pane"
+contexts = ["workspace"]
+command = ["./bin/herdr-party"]
+
+[[actions]]
+id = "open"
+title = "Open party pane"
+contexts = ["workspace"]
+command = ["./bin/herdr-party", "--open"]
+
+[[actions]]
+id = "close"
+title = "Close party pane"
+contexts = ["workspace"]
+command = ["./bin/herdr-party", "--close"]
+
+[[panes]]
+id = "party"
+title = "Party"
+placement = "split"
+command = ["./bin/herdr-party-agents"]
+
+[[panes]]
+id = "peek"
+title = "Party (peek)"
+placement = "popup"
+width = "70%"
+height = "80%"
+command = ["./bin/herdr-party-agents"]

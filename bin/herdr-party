@@ -10,6 +10,8 @@
 #     --focus   開いたペインにフォーカスを移す
 set -eu
 
+HERDR="${HERDR_BIN_PATH:-herdr}"
+
 if [ "${HERDR_ENV:-}" != 1 ]; then
   echo "herdr-party: Herdr のペイン内で実行してください (HERDR_ENV=1 が必要)" >&2
   exit 1
@@ -34,12 +36,19 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VIEWER="$SCRIPT_DIR/herdr-party-agents"
 
+# プラグインアクション経由などで呼び出し元の場所が無いときは、フォーカス中の space / タブを使う
+if [ -z "${HERDR_WORKSPACE_ID:-}" ] || [ -z "${HERDR_TAB_ID:-}" ]; then
+  cur="$("$HERDR" pane current 2>/dev/null || true)"
+  HERDR_WORKSPACE_ID="${HERDR_WORKSPACE_ID:-$(printf '%s' "$cur" | jq -r '.result.pane.workspace_id // empty')}"
+  HERDR_TAB_ID="${HERDR_TAB_ID:-$(printf '%s' "$cur" | jq -r '.result.pane.tab_id // empty')}"
+fi
+
 # 現在のタブで、ビューアを前面で動かしているペインを探す
 find_party_panes() {
-  herdr pane list --workspace "$HERDR_WORKSPACE_ID" \
+  "$HERDR" pane list --workspace "$HERDR_WORKSPACE_ID" \
     | jq -r --arg tab "$HERDR_TAB_ID" '.result.panes[] | select(.tab_id == $tab) | .pane_id' \
     | while read -r pid; do
-        if herdr pane process-info --pane "$pid" 2>/dev/null \
+        if "$HERDR" pane process-info --pane "$pid" 2>/dev/null \
            | jq -e '.result.process_info.foreground_processes[]?.argv[]? | select(endswith("herdr-party-agents"))' >/dev/null; then
           echo "$pid"
         fi
@@ -54,7 +63,7 @@ fi
 
 case "$MODE" in
   close)
-    for pid in $existing; do herdr pane close "$pid" >/dev/null; done
+    for pid in $existing; do "$HERDR" pane close "$pid" >/dev/null; done
     ;;
   open)
     if [ -n "$existing" ]; then
@@ -63,12 +72,14 @@ case "$MODE" in
     fi
     # 右に分割。herdr の --ratio は元ペイン側の割合なので 1 - width を渡す。
     RATIO="$(awk -v w="$WIDTH" 'BEGIN { printf "%.3f", 1 - w }')"
-    split_json="$(herdr pane split --current --direction right --ratio "$RATIO" --cwd "$PWD" "$FOCUS")"
+    # 呼び出し元のペインが分かればそれを、なければ UI でフォーカス中のペインを分割する
+    if [ -n "${HERDR_PANE_ID:-}" ]; then target=(--current); else target=(); fi
+    split_json="$("$HERDR" pane split "${target[@]+"${target[@]}"}" --direction right --ratio "$RATIO" --cwd "$PWD" "$FOCUS")"
     pane_id="$(printf '%s' "$split_json" | jq -r '.result.pane.pane_id')"
     [ -n "$pane_id" ] && [ "$pane_id" != "null" ] || { echo "herdr-party: ペイン分割に失敗: $split_json" >&2; exit 1; }
-    herdr pane rename "$pane_id" "party" >/dev/null
+    "$HERDR" pane rename "$pane_id" "party" >/dev/null
     cmd="$(printf '%q ' "$VIEWER" "${VIEWER_ARGS[@]+"${VIEWER_ARGS[@]}"}")"
-    herdr pane run "$pane_id" "exec $cmd" >/dev/null
+    "$HERDR" pane run "$pane_id" "exec $cmd" >/dev/null
     echo "$pane_id"
     ;;
 esac

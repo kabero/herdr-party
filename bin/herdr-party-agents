@@ -76,7 +76,10 @@ SEAT_W = 8        # 席の幅（名前 6 文字 + 隙間 2）
 BUBBLE_ROWS = 3   # 吹き出し用に空けておく行数
 HALL_MARGIN = 2   # 会場の端から机までの余白
 TABLE_FILL = 0.8  # 机の最低幅（会場の使える幅に対する割合）
-CLICK_DELAY = 1.2   # クリック後、Herdr クライアント自身のクリック確定処理が終わるのを待つ秒数
+# クリック後、切り替えるまでの待ち。Herdr 0.9.0 以前はクライアントがクリックしたペインの
+# space へ引き戻す癖があるので長めに待つ。0.9.1 で修正済み（changelog #3760 #4153 #4171）。
+CLICK_DELAY_OLD = 1.2
+CLICK_DELAY = 0.2
 MOUSE_RESUME_DELAY = 1.0  # 切り替え後、マウス追跡を再開するまでの秒数
 FOCUS_WATCH = 2.0   # 切り替え後、戻されていないか監視する秒数
 FOCUS_RETRIES = 3   # 戻されたときに切り替え直す最大回数
@@ -195,9 +198,12 @@ def fmt_duration(sec):
 
 # ---------- herdr ----------
 
+HERDR_BIN = os.environ.get("HERDR_BIN_PATH") or "herdr"
+
+
 def herdr(*args):
     try:
-        out = subprocess.run(["herdr", *args], capture_output=True, text=True, timeout=10)
+        out = subprocess.run([HERDR_BIN, *args], capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.TimeoutExpired):
         return None
     if out.returncode != 0:
@@ -206,6 +212,16 @@ def herdr(*args):
         return json.loads(out.stdout)
     except json.JSONDecodeError:
         return None
+
+
+def herdr_version():
+    """(major, minor, patch)。取れなければ (0, 0, 0)。"""
+    try:
+        out = subprocess.run([HERDR_BIN, "--version"], capture_output=True, text=True, timeout=5).stdout
+        m = re.search(r"(\d+)\.(\d+)\.(\d+)", out)
+        return tuple(int(x) for x in m.groups()) if m else (0, 0, 0)
+    except (OSError, subprocess.TimeoutExpired):
+        return (0, 0, 0)
 
 
 def fetch(kind_filter):
@@ -721,6 +737,7 @@ def main():
     sys.stdout.flush()
 
     tick = 0.5 if mode == "party" else interval
+    click_delay = CLICK_DELAY_OLD if herdr_version() < (0, 9, 1) else CLICK_DELAY
     view = View()
     data = None
     last_fetch = 0.0
@@ -806,7 +823,7 @@ def main():
                     target = hit_test(view.hits, c[0], c[1])
                     debug(f"click col={c[0]} row={c[1]} -> {target and target[0]}")
                     if target is not None:
-                        start_focus(target, CLICK_DELAY)
+                        start_focus(target, click_delay)
                 if pos is not None:
                     new_key = hover_target(view.hits, pos[0], pos[1])
                     if new_key != view.hover_key:
