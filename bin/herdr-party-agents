@@ -440,6 +440,16 @@ def draw_guests(row, view, inner_w, above, x0, y0, lead_x=None, lobby=False):
     bubble_rows = [""] * BUBBLE_ROWS
     if wide is not None:
         bubble_rows = wide_bubble(wide[0], wide[1], inner_w, "down" if above else "up", view)
+    elif above and not lobby and view.next_key is not None:
+        # Enter の行き先（次はここ）の頭上に ▼ を出し、0.5 秒ごとに上下させる
+        for i, a in enumerate(row):
+            if guest_key(a) == view.next_key:
+                st = a.get("agent_status", "unknown")
+                cx = x0 + i * SEAT_W + fig_x + 1
+                glyph = STATUS_COLOR.get(st, "") + BOLD + "▼" + RESET
+                marker_row = BUBBLE_ROWS - 1 if view.frame % 2 == 0 else BUBBLE_ROWS - 2
+                bubble_rows[marker_row] = " " * cx + glyph
+                break
     for i, a in enumerate(row):
         key = guest_key(a)
         st = a.get("agent_status", "unknown")
@@ -744,7 +754,7 @@ def render_header(agents, view, inner_w):
             st = a.get("agent_status", "unknown")
             color = STATUS_COLOR.get(st, "")
             dur = fmt_duration(view.tracker.elapsed(a))
-            mark = (BOLD + "▶ ") if guest_key(a) == view.next_key else ""
+            mark = (BOLD + "⏎ ") if guest_key(a) == view.next_key else ""
             chips.append(f"{color}{mark}{view.names[guest_key(a)]}{RESET}" + (f" {fg(GRAY)}{dur}{RESET}" if dur else ""))
         lines.append(wcenter("   ".join(chips), inner_w))
     lines.append(fg(SOFT) + "┈" * inner_w + RESET)
