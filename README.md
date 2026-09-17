@@ -10,13 +10,14 @@ You can tell at a glance who is working, who is waiting for your approval, and w
        2 dancing   1 waiting   1 done   1 chilling      00:09:29
                     ⏎ Matsu 13m   Shizu 1m
 ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
+   herdr-party  master ✱3
                                                    ▼
         Sora [12]          Aoto [3]      ┆     Matsu [7]
          (54s)                           ┆       (13m)
           \o/                o           ┆        !o!
            |                /|\          ┆         |
           / \               / \          ┆        / \
-   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ herdr-party ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
                    master ✱3                     feat/x ✱1
     > make the stage      > write the        > fix the failing
       vertical              English README     test
@@ -89,7 +90,7 @@ Dependencies: `herdr`, `jq` (launcher), `python3` (viewer, standard library only
 
 ### Stages (spaces)
 
-- A stage spans the venue width, and performers stand centered on it with equal spacing. It is one row of platform with the name embedded in it, and captions under that.
+- A stage spans the venue width, and performers stand centered on it with equal spacing. It is one row of platform, with the banner above and captions below.
 - When a single row does not fit, the stage widens to the full venue, and anyone left over stands in a back row (above).
 - Stages are per git repository. Worktrees of the same repository (separate spaces in Herdr) stand on one stage, divided into sections by `┆`. Each section shows its branch and change count underneath (`master ✱3 ↑1`: uncommitted changes, and ahead/behind of the remote), and the stage is named after the repository. Clicking a section jumps to that worktree's space.
 - If the sections do not fit side by side, each becomes its own stage with the same repository name. Spaces outside git use the space label as the stage name.
@@ -97,7 +98,7 @@ Dependencies: `herdr`, `jq` (launcher), `python3` (viewer, standard library only
 
 ### Captions under each guest
 
-Right under each guest's spot on the stage, in that guest's column, sits a caption: `> …` is the last prompt you gave that session (up to three lines), read from the conversation log as it grows, so it updates the moment you send a new instruction. Done guests also get `< …` with the start of the reply that finished, and blocked guests `? …` with what the approval dialog or question is asking. Seats widen when there are fewer guests (up to 26 columns), so captions get more room. The repository name and git status are written into the platform itself (`▄▄▄ herdr-party  master ✱3 ▄▄▄`), placed so they do not cover the spotlight; worktree sections show their branch on the line below the platform.
+Right under each guest's spot on the stage, in that guest's column, sits a caption: `> …` is the last prompt you gave that session (up to three lines), read from the conversation log as it grows, so it updates the moment you send a new instruction. Done guests also get `< …` with the start of the reply that finished, and blocked guests `? …` with what the approval dialog or question is asking. Seats widen when there are fewer guests (up to 26 columns), so captions get more room. The repository name and git status sit above the stage as a banner: white text on a background in the space's color; worktree sections show their branch on the line below the platform.
 
 ### Lobby
 

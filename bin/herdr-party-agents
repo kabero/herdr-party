@@ -71,6 +71,17 @@ STATUS_COLOR = {
 STATUS_WORD = {"working": "dancing", "blocked": "waiting", "done": "done", "idle": "chilling", "unknown": "?"}
 ICON = {"working": "◐", "blocked": "◆", "done": "✔", "idle": "●", "unknown": "?"}
 TABLE_PALETTE = [PINK, CYAN, LAVENDER, MINT, PEACH, LEMON]
+BANNER_BG = {PINK: 162, CYAN: 31, LAVENDER: 98, MINT: 29, PEACH: 166, LEMON: 136}  # 帯の背景（同系統の濃い色）
+WHITE = 231
+
+
+def bg(n):
+    return f"{ESC}[48;5;{n}m"
+
+
+def banner(text, color_n, focused):
+    """白文字に space の色の背景の帯。"""
+    return bg(BANNER_BG.get(color_n, 240)) + fg(WHITE) + (BOLD if focused else "") + " " + text + " " + RESET
 RAINBOW = [203, 209, 215, 221, 227, 155, 120, 86, 81, 75, 105, 141, 177, 213]  # 稼働中の棒人間を流れる虹色
 ATTENTION = ("blocked", "done")  # 要注意として上部に並べる状態
 TIMED_STATES = ("blocked", "done", "working")  # 名前の下に経過時間を出す状態
@@ -644,13 +655,14 @@ def render_stage(ws_id, label, guests, view, inner_w, color_n, focused_ws, y_bas
     plain_git = ANSI_RE.sub("", git_txt)
     if plain_git and wlen(head) + 2 + wlen(plain_git) <= inner - 2:
         head += "  " + plain_git
+    view.hits.append((offset, offset + stage_w - 1, y_base, y_base, ("table", ws_id)))
+    lines.append(pad + " " + banner(head, color_n, focused_ws))
     for row in reversed(rows[1:]):
         lines.extend(draw_guests(row, view, inner_w, True, offset + 1 + seat_x(len(row)), y_base + len(lines), seat_w=seat_w))
     front_sx = seat_x(len(rows[0]))
     lines.extend(draw_guests(rows[0], view, inner_w, True, offset + 1 + front_sx, y_base + len(lines), seat_w=seat_w))
     view.hits.append((offset, offset + stage_w - 1, y_base + len(lines), y_base + len(lines), ("table", ws_id)))
-    lines.append(pad + " " + stage_top(inner, rows[0], color, seat_x=front_sx, seat_w=seat_w,
-                                       label=head, label_style=(BOLD if focused_ws else "") + color))
+    lines.append(pad + " " + stage_top(inner, rows[0], color, seat_x=front_sx, seat_w=seat_w))
     lines.extend(caption_rows(rows[0], view, seat_w, offset + 1 + front_sx))
     lines.append("")
     return lines
@@ -698,6 +710,8 @@ def render_shared_stage(name, sections, view, inner_w, color_n, y_base):
 
     lines = []
     any_focused = any(f for _, _, f, _ in sections)
+    view.hits.append((offset, offset + stage_w - 1, y_base, y_base, ("table", sections[0][1])))
+    lines.append(pad + " " + banner(wtrunc(name, inner - 2), color_n, any_focused))
     y0 = y_base + len(lines)
     parts = []
     spans = []
@@ -726,7 +740,7 @@ def render_shared_stage(name, sections, view, inner_w, color_n, y_base):
             if a.get("focused"):
                 center = x + i * seat_w + fig_x + 1
                 spots.update(range(center - 2, center + 3))
-    lines.append(pad + " " + platform_row(inner, color, spots, wtrunc(name, inner - 2), (BOLD if any_focused else "") + color))
+    lines.append(pad + " " + platform_row(inner, color, spots, "", ""))
     labels = [((BOLD if f else "") + t + RESET) for t, _, f, _ in sections]
     lines.append(pad + " " + place_labels(spans, labels, inner))
     # 足元のキャプション（区画ごとに列を合わせる）
