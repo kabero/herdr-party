@@ -489,7 +489,8 @@ def render_header(agents, view, inner_w):
     for a in agents:
         st = a.get("agent_status", "unknown")
         counts[st] = counts.get(st, 0) + 1
-    parts = [rainbow_text(f"◐ {counts['working']} dancing", view.frame)]
+    # 誰も踊っていないときは虹色のまま止める
+    parts = [rainbow_text(f"◐ {counts['working']} dancing", view.frame if counts["working"] else 0)]
     if counts["blocked"]:
         parts.append(f"{fg(RED)}{BOLD}◆ {counts['blocked']} waiting{RESET}")
     if counts["done"]:
