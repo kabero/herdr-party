@@ -427,7 +427,7 @@ def stage_top(inner, row, color, seat_x=0):
     for i, a in enumerate(row):
         if a.get("focused"):
             center = seat_x + i * SEAT_W + fig_x + 1
-            for pos in range(center - 2, center + 3):
+            for pos in range(center - 1, center + 2):
                 if 0 <= pos < inner:
                     cells[pos] = fg(LEMON) + "█" + RESET
     return "".join(cells)
@@ -550,7 +550,7 @@ def render_shared_stage(name, sections, view, inner_w, color_n, y_base):
         for i, a in enumerate(guests):
             if a.get("focused"):
                 center = x + i * SEAT_W + fig_x + 1
-                for pos in range(center - 2, center + 3):
+                for pos in range(center - 1, center + 2):
                     if 0 <= pos < inner:
                         cells[pos] = fg(LEMON) + "█" + RESET
     lines.append(pad + " " + "".join(cells))
