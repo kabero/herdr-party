@@ -103,6 +103,7 @@ CAPTION_LINES = 5  # 足元のキャプションの最大行数（プロンプ�
 CAPTION_PROMPT_LINES = 3
 BUBBLE_ROWS = 1   # 頭上の ▼ マーカー用の行
 HALL_MARGIN = 2   # 会場の端からステージまでの余白
+STAGE_GAP = 3     # space（ステージ）の間に空ける行数
 TABLE_FILL = 0.8  # ステージの最低幅（会場の使える幅に対する割合）
 # クリック後、切り替えるまでの待ち。Herdr 0.9.0 以前はクライアントがクリックしたペインの
 # space へ引き戻す癖があるので長めに待つ。0.9.1 で修正済み（changelog #3760 #4153 #4171）。
@@ -656,7 +657,7 @@ def render_stage(ws_id, label, guests, view, inner_w, color_n, focused_ws, y_bas
     view.hits.append((offset, offset + stage_w - 1, y_base + len(lines), y_base + len(lines), ("table", ws_id)))
     lines.append(pad + " " + stage_top(inner, rows[0], color, seat_x=front_sx, seat_w=seat_w))
     lines.extend(caption_rows(rows[0], view, seat_w, offset + 1 + front_sx))
-    lines.append("")
+    lines.extend([""] * STAGE_GAP)
     return lines
 
 
@@ -746,7 +747,7 @@ def render_shared_stage(name, sections, view, inner_w, color_n, y_base):
             cell = c[r] if r < len(c) else ""
             line += " " * max(0, x - wlen(line)) + cell
         lines.append(pad + " " + line)
-    lines.append("")
+    lines.extend([""] * STAGE_GAP)
     return lines
 
 
