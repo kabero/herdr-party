@@ -627,14 +627,13 @@ def render_stage(ws_id, label, guests, view, inner_w, color_n, focused_ws, y_bas
     head = (BOLD if focused_ws else "") + color + wtrunc(label, inner) + RESET
     if git_txt and wlen(head) + 2 + wlen(git_txt) <= inner:
         head += "  " + git_txt
-    view.hits.append((offset, offset + stage_w - 1, y_base, y_base, ("table", ws_id)))
-    lines.append(pad + " " + head)
     for row in reversed(rows[1:]):
         lines.extend(draw_guests(row, view, inner_w, True, offset + 1 + seat_x(len(row)), y_base + len(lines), seat_w=seat_w))
     front_sx = seat_x(len(rows[0]))
     lines.extend(draw_guests(rows[0], view, inner_w, True, offset + 1 + front_sx, y_base + len(lines), seat_w=seat_w))
-    view.hits.append((offset, offset + stage_w - 1, y_base + len(lines), y_base + len(lines), ("table", ws_id)))
+    view.hits.append((offset, offset + stage_w - 1, y_base + len(lines), y_base + len(lines) + 1, ("table", ws_id)))
     lines.append(pad + " " + stage_top(inner, rows[0], color, seat_x=front_sx, seat_w=seat_w))
+    lines.append(pad + " " + wcenter(head, inner))
     lines.extend(caption_rows(rows[0], view, seat_w, offset + 1 + front_sx))
     lines.append("")
     return lines
@@ -682,8 +681,6 @@ def render_shared_stage(name, sections, view, inner_w, color_n, y_base):
 
     lines = []
     any_focused = any(f for _, _, f, _ in sections)
-    view.hits.append((offset, offset + stage_w - 1, y_base, y_base, ("table", sections[0][1])))
-    lines.append(pad + " " + (BOLD if any_focused else "") + color + wtrunc(name, inner) + RESET)
     y0 = y_base + len(lines)
     parts = []
     spans = []
@@ -715,6 +712,8 @@ def render_shared_stage(name, sections, view, inner_w, color_n, y_base):
                     if 0 <= pos < inner:
                         cells[pos] = fg(LEMON) + "▄" + RESET
     lines.append(pad + " " + "".join(cells))
+    view.hits.append((offset, offset + stage_w - 1, y_base + len(lines), y_base + len(lines), ("table", sections[0][1])))
+    lines.append(pad + " " + wcenter((BOLD if any_focused else "") + color + wtrunc(name, inner) + RESET, inner))
     labels = [((BOLD if f else "") + t + RESET) for t, _, f, _ in sections]
     lines.append(pad + " " + place_labels(spans, labels, inner))
     # 足元のキャプション（区画ごとに列を合わせる）

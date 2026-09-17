@@ -90,7 +90,7 @@ Dependencies: `herdr`, `jq` (launcher), `python3` (viewer, standard library only
 
 ### Stages (spaces)
 
-- A stage spans the venue width, and performers stand centered on it with equal spacing. It is one row of platform, with the heading above and captions below.
+- A stage spans the venue width, and performers stand centered on it with equal spacing. It is one row of platform, with the name right below it and captions under that.
 - When a single row does not fit, the stage widens to the full venue, and anyone left over stands in a back row (above).
 - Stages are per git repository. Worktrees of the same repository (separate spaces in Herdr) stand on one stage, divided into sections by `┆`. Each section shows its branch and change count underneath (`master ✱3 ↑1`: uncommitted changes, and ahead/behind of the remote), and the stage is named after the repository. Clicking a section jumps to that worktree's space.
 - If the sections do not fit side by side, each becomes its own stage with the same repository name. Spaces outside git use the space label as the stage name.
@@ -98,7 +98,7 @@ Dependencies: `herdr`, `jq` (launcher), `python3` (viewer, standard library only
 
 ### Captions under each guest
 
-Right under each guest's spot on the stage, in that guest's column, sits a caption: `> …` is the last prompt you gave that session (up to three lines), read from the conversation log as it grows, so it updates the moment you send a new instruction. Done guests also get `< …` with the start of the reply that finished, and blocked guests `? …` with what the approval dialog or question is asking. Seats widen when there are fewer guests (up to 26 columns), so captions get more room. The repository name and git status sit above the stage as a heading; worktree sections show their branch under the stage.
+Right under each guest's spot on the stage, in that guest's column, sits a caption: `> …` is the last prompt you gave that session (up to three lines), read from the conversation log as it grows, so it updates the moment you send a new instruction. Done guests also get `< …` with the start of the reply that finished, and blocked guests `? …` with what the approval dialog or question is asking. Seats widen when there are fewer guests (up to 26 columns), so captions get more room. The repository name and git status sit right under the platform; worktree sections show their branch on the line below that.
 
 ### Lobby
 
