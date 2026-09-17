@@ -52,6 +52,7 @@ def fg(n):
 PINK, CYAN, LAVENDER, MINT, PEACH, LEMON, RED = 213, 117, 141, 121, 216, 228, 210
 SAGE = 108  # idle 用の控えめな緑
 GRAY, SOFT = 245, 240
+NAME = 253  # 棒人間の名前（GRAY だと薄すぎる）
 STATUS_COLOR = {
     "working": fg(LEMON),
     "blocked": fg(RED),
@@ -434,7 +435,7 @@ def draw_guests(row, view, inner_w, above, x0, y0, lead_x=None):
         if key == view.selected_key:
             name_row += BOLD + fg(PINK) + name_cell + RESET
         else:
-            name_row += fg(GRAY) + name_cell + RESET
+            name_row += fg(NAME) + name_cell + RESET
         # 名前の下に、いまの状態になってからの時間を (54s) のように出す
         elapsed = view.tracker.elapsed(a) if st in TIMED_STATES else None
         time_txt = f"({fmt_duration(elapsed)})" if elapsed is not None else ""
