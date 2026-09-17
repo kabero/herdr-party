@@ -43,10 +43,11 @@ if [ -z "${HERDR_WORKSPACE_ID:-}" ] || [ -z "${HERDR_TAB_ID:-}" ]; then
   HERDR_TAB_ID="${HERDR_TAB_ID:-$(printf '%s' "$cur" | jq -r '.result.pane.tab_id // empty')}"
 fi
 
-# 現在のタブで、ビューアを前面で動かしているペインを探す
+# どの space にいても、ビューアを前面で動かしているペインを探す（追従で別タブへ行っていることがある）
 find_party_panes() {
-  "$HERDR" pane list --workspace "$HERDR_WORKSPACE_ID" \
-    | jq -r --arg tab "$HERDR_TAB_ID" '.result.panes[] | select(.tab_id == $tab) | .pane_id' \
+  "$HERDR" workspace list | jq -r '.result.workspaces[].workspace_id' | while read -r ws; do
+    "$HERDR" pane list --workspace "$ws" | jq -r '.result.panes[].pane_id'
+  done \
     | while read -r pid; do
         if "$HERDR" pane process-info --pane "$pid" 2>/dev/null \
            | jq -e '.result.process_info.foreground_processes[]?.argv[]? | select(endswith("herdr-party-agents"))' >/dev/null; then
@@ -78,7 +79,7 @@ case "$MODE" in
     pane_id="$(printf '%s' "$split_json" | jq -r '.result.pane.pane_id')"
     [ -n "$pane_id" ] && [ "$pane_id" != "null" ] || { echo "herdr-party: ペイン分割に失敗: $split_json" >&2; exit 1; }
     "$HERDR" pane rename "$pane_id" "party" >/dev/null
-    cmd="$(printf '%q ' "$VIEWER" "${VIEWER_ARGS[@]+"${VIEWER_ARGS[@]}"}")"
+    cmd="$(printf '%q ' "$VIEWER" --width "$WIDTH" "${VIEWER_ARGS[@]+"${VIEWER_ARGS[@]}"}")"
     "$HERDR" pane run "$pane_id" "exec $cmd" >/dev/null
     echo "$pane_id"
     ;;

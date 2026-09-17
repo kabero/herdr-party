@@ -109,9 +109,19 @@ The first line shows the count per state and a clock. The word "dancing" flows i
 | `?` | Shows / hides the help line |
 | `q` | Quits (and closes the pane) |
 
+Toggling with the plugin action closes the party wherever it currently is, even if it has followed you to another space.
+
+## Following you around
+
+A pane belongs to one tab, so by itself the party would disappear when you switch tabs or spaces. By default the viewer follows you instead: when it sees a `tab.focused` event for another tab, it moves its own pane there with `pane move`, as a right split of the same width (`--width`, 30% by default). The pane only moves between tabs, so its content, elapsed times, and selection are all kept. Clicking on the party pane itself never moves it. Pass `--no-follow` to stay put.
+
+```bash
+./bin/herdr-party -- --no-follow   # stay in the tab it was opened in
+```
+
 ## Keeping it in the sidebar
 
-A pane disappears when you move to another space or tab. To see the party everywhere, use Herdr's sidebar.
+If you prefer the pane to stay put, Herdr's sidebar is another way to see the party everywhere.
 Run the viewer with `--report`, or run the headless `--report-only`, and each session's pane gets its name and pose reported as metadata.
 
 ```bash

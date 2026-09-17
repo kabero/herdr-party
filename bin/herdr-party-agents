@@ -9,6 +9,9 @@
     --report        描画しつつ、各セッションのペインに名前とポーズをメタデータとして報告する
                     （Herdr のサイドバーで $party_name / $party_pose として表示できる）
     --report-only   画面を出さずに報告だけを続ける。--once で 1 回だけ報告して終了
+    --follow        タブや space を移動したら会場のペインも移動先の右側へ引っ越す（既定）
+    --no-follow     引っ越さない
+    --width RATIO   引っ越すときの会場の幅の割合（デフォルト 0.3）
 
 操作:
   マウス      棒人間に乗せるとタイトル、クリックでそのセッションを開く
@@ -955,6 +958,8 @@ class EventWatcher:
         self.path = os.environ.get("HERDR_SOCKET_PATH") or os.path.expanduser("~/.config/herdr/herdr.sock")
         self.lock = threading.Lock()
         self.focused_pane = None
+        self.focused_tab = None   # (tab_id, workspace_id)
+        self.last_pane = None     # 最後にフォーカスされたペイン（リセットしない）
         self.dirty = False
         self.pane_ids = ()
         self.sock = None
@@ -974,11 +979,11 @@ class EventWatcher:
                     pass
 
     def take(self):
-        """(取り直しが必要か, 最後にフォーカスされたペイン ID) を返してリセットする。"""
+        """(取り直しが必要か, フォーカスされたペイン ID, フォーカスされたタブ) を返してリセットする。"""
         with self.lock:
-            dirty, focused = self.dirty, self.focused_pane
-            self.dirty, self.focused_pane = False, None
-        return dirty, focused
+            dirty, focused, tab = self.dirty, self.focused_pane, self.focused_tab
+            self.dirty, self.focused_pane, self.focused_tab = False, None, None
+        return dirty, focused, tab
 
     def wake(self):
         try:
@@ -1030,11 +1035,71 @@ class EventWatcher:
             with self.lock:
                 if kind == "pane_focused" and data.get("pane_id"):
                     self.focused_pane = data["pane_id"]
-                elif kind in ("workspace_focused", "tab_focused"):
-                    pass  # pane_focused が一緒に来るので取り直しは要らない
+                    self.last_pane = data["pane_id"]
+                elif kind == "tab_focused" and data.get("tab_id"):
+                    self.focused_tab = (data["tab_id"], data.get("workspace_id", ""))
+                elif kind == "workspace_focused":
+                    pass  # pane_focused / tab_focused が一緒に来る
+                elif kind == "pane_moved":
+                    pass  # 自分の引っ越し。レイアウトだけの変化
                 else:
                     self.dirty = True
             self.wake()
+
+
+# ---------- 会場のペインの引っ越し（追従） ----------
+
+FOLLOW_SETTLE = 0.25  # 秒。タブ切り替えが連続したときにまとめる
+
+
+class Follower:
+    """会場のペインを、ユーザーがいるタブの右側へ引っ越させる。"""
+
+    def __init__(self, width):
+        self.width = width
+        self.pane_id = os.environ.get("HERDR_PANE_ID", "")
+        self.tab_id = os.environ.get("HERDR_TAB_ID", "")
+        self.aliases = {self.pane_id}   # 過去の自分のペイン ID（イベントが古い ID で来ることがある）
+        self.lock = threading.Lock()
+        self.target = None
+        self.moving = False
+        self.last_move = 0.0
+
+    def is_self(self, pane_id):
+        return pane_id in self.aliases
+
+    def request(self, tab_id, ws_id):
+        if not tab_id or tab_id == self.tab_id:
+            return
+        with self.lock:
+            self.target = (tab_id, ws_id)
+            if self.moving:
+                return
+            self.moving = True
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self):
+        while True:
+            time.sleep(FOLLOW_SETTLE)
+            with self.lock:
+                target, self.target = self.target, None
+            if target is None or target[0] == self.tab_id:
+                with self.lock:
+                    if self.target is None:
+                        self.moving = False
+                        return
+                continue
+            ratio = f"{max(0.05, min(0.95, 1 - self.width)):.3f}"
+            res = herdr("pane", "move", self.pane_id, "--tab", target[0], "--split", "right", "--ratio", ratio, "--no-focus")
+            pane = ((res or {}).get("result") or {}).get("move_result", {}).get("pane") or {}
+            if pane.get("pane_id"):
+                self.pane_id = pane["pane_id"]
+                self.tab_id = pane.get("tab_id", target[0])
+                self.aliases.add(self.pane_id)
+                self.last_move = time.monotonic()
+                debug(f"followed to {self.tab_id} as {self.pane_id}")
+            else:
+                debug(f"follow move failed: {res}")
 
 
 # ---------- サイドバーへの報告 ----------
@@ -1145,9 +1210,17 @@ def main():
     mode = "party"
     report = False
     once = False
+    follow = True
+    width = 0.3
     while args:
         a = args.pop(0)
-        if a == "--all":
+        if a == "--follow":
+            follow = True
+        elif a == "--no-follow":
+            follow = False
+        elif a == "--width":
+            width = float(args.pop(0)) if args else 0.3
+        elif a == "--all":
             kind_filter = ""
         elif a == "--interval":
             interval = float(args.pop(0)) if args else 2.0
@@ -1198,6 +1271,7 @@ def main():
     worker = None
     wake_r, wake_w = os.pipe()
     watcher = EventWatcher(wake_w)
+    follower = Follower(width) if (follow and mode == "party" and os.environ.get("HERDR_PANE_ID")) else None
     need_fetch = False
 
     def apply_focus(pane_id):
@@ -1296,11 +1370,15 @@ def main():
                     break
                 if wake_r in r:
                     os.read(wake_r, 4096)
-                    dirty, focused = watcher.take()
+                    dirty, focused, tab = watcher.take()
                     if focused is not None:
                         view.last_seen[focused] = time.time()
                         if apply_focus(focused):
                             redraw = True
+                    if follower is not None and tab is not None:
+                        # 自分のペインがクリックされたときは動かない
+                        if not (watcher.last_pane and follower.is_self(watcher.last_pane)):
+                            follower.request(tab[0], tab[1])
                     if dirty:
                         need_fetch = True
                         redraw = True
