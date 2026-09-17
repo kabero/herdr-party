@@ -496,11 +496,9 @@ def stage_top(inner, row, color, seat_x=0):
 
 
 def activity_lines(guests, view, inner, pad):
-    """ステージ名の下に、idle でない人ごとに「名前 ▸ 投げたプロンプト」を 1 行ずつ出す。"""
+    """ステージ名の下に、人ごとに「名前 ▸ 投げたプロンプト」を 1 行ずつ出す。"""
     out = []
     for a in guests:
-        if a.get("agent_status") not in TIMED_STATES:
-            continue
         act = view.prompts.last_prompt(a)
         if not act:
             continue
@@ -721,6 +719,7 @@ def render_lobby(lobby, view, inner_w, y_base):
         row = lobby[start:start + per_row]
         x0 = max(HALL_MARGIN, (inner_w - (len(row) * SEAT_W - 2)) // 2)
         lines.extend(draw_guests(row, view, inner_w, True, x0, y_base + len(lines), lobby=True))
+        lines.extend(activity_lines(row, view, inner_w - HALL_MARGIN * 2, " " * (HALL_MARGIN - 1)))
     lines.append("")
     return lines
 
