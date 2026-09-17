@@ -125,12 +125,11 @@ rows = [["state_icon", "machine", "workspace", "tab"], ["$party_pose", "$party_n
 
 ## 仕組みのメモ
 
-- ビューアは `herdr agent list` と `herdr workspace list` を 2 秒ごとに取得し、0.5 秒ごとに描画します。
+- ビューアは Herdr の socket API で `pane.focused` `pane.agent_status_changed` `pane.created` などのイベントを購読し、来た瞬間に反映します。フォーカスの移動はイベントの pane_id から即座にスポットライトへ反映し、それ以外は `herdr agent list` と `herdr workspace list` を取り直します。保険として 2 秒ごとの取得も続け、描画は 0.5 秒ごとです。
 - xterm のマウス移動追跡（1003 モード）を有効にするので、Herdr の `mouse_capture` が有効でもホバーとクリックがペインに届きます。
 - Herdr 0.9.0 以前のクライアントは、API で space を切り替えた直後にクリックしたペインの space へ引き戻すことがあります（0.9.1 で修正。changelog #3760 #4153 #4171）。0.9.0 以前ではボタンを離してから 1.2 秒待って切り替え、そのあと 2 秒間は戻されていないか監視して、戻されていたら切り替え直します。0.9.1 以降は待ちを 0.2 秒にしています。クリックで確実に移動したいなら `herdr update` で 0.9.1 以降にしてください。
 - 環境変数 `HERDR_PARTY_LOG` にファイルパスを入れて起動すると、クリックとフォーカスの経過がそのファイルに残ります。
 
 ## 今後のアイデア
 
-- Herdr の socket API にある `pane.agent_status_changed` イベントを購読してポーリングをやめる
 - `pane report-metadata` でサイドバーにも小さな棒人間を出し、どの space にいても見えるようにする

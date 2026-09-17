@@ -27,6 +27,7 @@ import os
 import re
 import select
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -577,6 +578,108 @@ def render_list(agents, view, cols, interval, kind_filter):
     return lines
 
 
+# ---------- イベント購読 ----------
+
+LIFECYCLE_EVENTS = ("pane.focused", "workspace.focused", "tab.focused", "pane.updated",
+                    "pane.created", "pane.closed", "pane.moved", "pane.exited", "pane.agent_detected",
+                    "workspace.renamed", "workspace.closed", "workspace.created")
+
+
+class EventWatcher:
+    """Herdr の socket でイベントを購読し、来たらパイプに 1 バイト書いてメインループを起こす。
+
+    pane.focused はペイン ID を持つので、取り直しを待たずにスポットライトを動かせるよう
+    最後にフォーカスされたペインを覚えておく。pane.agent_status_changed はペインごとの購読なので、
+    エージェントのいるペインの集合が変わったら接続を張り直す。
+    """
+
+    def __init__(self, wake_fd):
+        self.wake_fd = wake_fd
+        self.path = os.environ.get("HERDR_SOCKET_PATH") or os.path.expanduser("~/.config/herdr/herdr.sock")
+        self.lock = threading.Lock()
+        self.focused_pane = None
+        self.dirty = False
+        self.pane_ids = ()
+        self.sock = None
+        self.connected = False
+        self.thread = threading.Thread(target=self.run, daemon=True)
+        self.thread.start()
+
+    def watch_panes(self, pane_ids):
+        pane_ids = tuple(sorted(pane_ids))
+        if pane_ids != self.pane_ids:
+            self.pane_ids = pane_ids
+            sock = self.sock
+            if sock is not None:
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)  # 張り直し
+                except OSError:
+                    pass
+
+    def take(self):
+        """(取り直しが必要か, 最後にフォーカスされたペイン ID) を返してリセットする。"""
+        with self.lock:
+            dirty, focused = self.dirty, self.focused_pane
+            self.dirty, self.focused_pane = False, None
+        return dirty, focused
+
+    def wake(self):
+        try:
+            os.write(self.wake_fd, b"x")
+        except OSError:
+            pass
+
+    def run(self):
+        backoff = 1.0
+        while True:
+            try:
+                self.serve_once()
+                backoff = 1.0
+            except OSError:
+                pass
+            self.connected = False
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 10.0)
+
+    def serve_once(self):
+        subs = [{"type": t} for t in LIFECYCLE_EVENTS]
+        subs += [{"type": "pane.agent_status_changed", "pane_id": pid} for pid in self.pane_ids]
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(5)
+        sock.connect(self.path)
+        self.sock = sock
+        f = sock.makefile("rwb")
+        f.write((json.dumps({"id": "party", "method": "events.subscribe", "params": {"subscriptions": subs}}) + "\n").encode())
+        f.flush()
+        ack = json.loads(f.readline() or b"{}")
+        if "error" in ack:
+            debug(f"subscribe error: {ack['error']}")
+            sock.close()
+            return
+        self.connected = True
+        debug(f"subscribed: {len(subs)} subscriptions")
+        sock.settimeout(None)
+        while True:
+            line = f.readline()
+            if not line:
+                return
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue
+            kind = ev.get("event", "")
+            data = ev.get("data") or {}
+            debug(f"event {kind} {data.get('pane_id', '')}")
+            with self.lock:
+                if kind == "pane_focused" and data.get("pane_id"):
+                    self.focused_pane = data["pane_id"]
+                elif kind in ("workspace_focused", "tab_focused"):
+                    pass  # pane_focused が一緒に来るので取り直しは要らない
+                else:
+                    self.dirty = True
+            self.wake()
+
+
 # ---------- サイドバーへの報告 ----------
 
 SIDEBAR_POSES = {
@@ -736,6 +839,26 @@ def main():
     last_fetch = 0.0
     mouse_resume_at = None
     worker = None
+    wake_r, wake_w = os.pipe()
+    watcher = EventWatcher(wake_w)
+    need_fetch = False
+
+    def apply_focus(pane_id):
+        """pane.focused を取り直しを待たずに反映する。"""
+        if data is None:
+            return False
+        changed = False
+        for a in data[0]:
+            want = a.get("pane_id") == pane_id
+            if bool(a.get("focused")) != want:
+                a["focused"] = want
+                changed = True
+        for w in data[1]:
+            want = w.get("workspace_id") == pane_id.split(":")[0]
+            if bool(w.get("focused")) != want:
+                w["focused"] = want
+                changed = True
+        return changed
 
     def start_focus(target, delay):
         nonlocal worker, mouse_resume_at
@@ -775,15 +898,17 @@ def main():
     try:
         while True:
             now = time.monotonic()
-            if data is None or now - last_fetch >= interval:
+            if data is None or need_fetch or now - last_fetch >= interval:
                 fetched = fetch(kind_filter)
                 if fetched is not None:
                     data = fetched
                     view.tracker.update(data[0])
                     view.names = assign_names(data[0])
+                    watcher.watch_panes(a.get("pane_id", "") for a in data[0])
                     if report:
                         threading.Thread(target=report_tokens, args=(data[0], view.names, view.frame), daemon=True).start()
                 last_fetch = now
+                need_fetch = False
             if mouse_resume_at is not None and time.monotonic() >= mouse_resume_at:
                 sys.stdout.write(MOUSE_ON)
                 mouse_resume_at = None
@@ -797,19 +922,26 @@ def main():
             sys.stdout.write(ESC + "[H" + ESC + "[2J" + "\n".join(lines[:rows_n]))
             sys.stdout.flush()
             view.frame += 1
-            if not is_tty:
-                time.sleep(tick)
-                continue
-            # tick まで入力を待つ。表示が変わる操作があればすぐ描き直す
+            # tick まで入力かイベントを待つ。表示が変わるものがあればすぐ描き直す
             deadline = time.monotonic() + tick
             redraw = False
             while not redraw:
                 remain = deadline - time.monotonic()
                 if remain <= 0:
                     break
-                r, _, _ = select.select([fd], [], [], remain)
+                r, _, _ = select.select([fd, wake_r] if is_tty else [wake_r], [], [], remain)
                 if not r:
                     break
+                if wake_r in r:
+                    os.read(wake_r, 4096)
+                    dirty, focused = watcher.take()
+                    if focused is not None and apply_focus(focused):
+                        redraw = True
+                    if dirty:
+                        need_fetch = True
+                        redraw = True
+                if fd not in r:
+                    continue
                 raw = os.read(fd, 4096)
                 pos, clicks, keys = parse_input(raw)
                 for c in clicks:
