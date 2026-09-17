@@ -6,7 +6,7 @@
 
 ```
      ◐ 2 dancing   ◆ 1 waiting   ✔ 1 done   ● 2 chilling      00:09:29
-                     ◆ Matsu 13m   ✔ Shizu
+                       Matsu 13m   Shizu
 ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
      Sora    Aoto   Matsu   Shizu   Subaru
     (54s)           (13m)            (2h)

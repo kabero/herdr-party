@@ -475,13 +475,21 @@ def attention_list(agents, view):
     return att
 
 
+def rainbow_text(text, frame):
+    """1 文字ずつ虹色をずらして流す（踊っている棒人間と同じ色の並び）。"""
+    return "".join(
+        (fg(RAINBOW[(frame * 2 + i * 2) % len(RAINBOW)]) + ch) if ch != " " else " "
+        for i, ch in enumerate(text)
+    ) + RESET
+
+
 def render_header(agents, view, inner_w):
     clock = time.strftime("%H:%M:%S")
     counts = {k: 0 for k in ICON}
     for a in agents:
         st = a.get("agent_status", "unknown")
         counts[st] = counts.get(st, 0) + 1
-    parts = [f"{fg(LEMON)}◐ {counts['working']} dancing{RESET}"]
+    parts = [rainbow_text(f"◐ {counts['working']} dancing", view.frame)]
     if counts["blocked"]:
         parts.append(f"{fg(RED)}{BOLD}◆ {counts['blocked']} waiting{RESET}")
     if counts["done"]:
@@ -505,7 +513,7 @@ def render_header(agents, view, inner_w):
             st = a.get("agent_status", "unknown")
             color = STATUS_COLOR.get(st, "")
             dur = fmt_duration(view.tracker.elapsed(a))
-            chips.append(f"{color}{ICON[st]} {view.names[guest_key(a)]}{RESET}" + (f" {fg(GRAY)}{dur}{RESET}" if dur else ""))
+            chips.append(f"{color}{view.names[guest_key(a)]}{RESET}" + (f" {fg(GRAY)}{dur}{RESET}" if dur else ""))
         lines.append(wcenter("   ".join(chips), inner_w))
     lines.append(fg(SOFT) + "┈" * inner_w + RESET)
     return lines
