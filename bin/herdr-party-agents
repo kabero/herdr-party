@@ -528,7 +528,7 @@ def activity_lines(guests, view, inner, pad):
         if not act:
             continue
         name = view.names.get(guest_key(a), "")
-        head = f"{name} ▸ "
+        head = f"{name} > "
         width = max(4, inner - wlen(head))
         for i, chunk in enumerate(wwrap(act, width, PROMPT_LINES)):
             lead = (fg(NAME) + head + RESET) if i == 0 else " " * wlen(head)

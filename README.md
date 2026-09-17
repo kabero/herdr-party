@@ -94,7 +94,7 @@ Dependencies: `herdr`, `jq` (launcher), `python3` (viewer, standard library only
 
 ### What you asked each guest
 
-Under the stage name (and under the lobby rows), every guest gets a line like `Sota ▸ make the spotlight narrower`: the last prompt you gave that session, wrapped to two lines, read from the conversation log as it grows, so it updates the moment you send a new instruction. Slash commands show as their name and arguments.
+Under the stage name (and under the lobby rows), every guest gets a line like `Sota > make the spotlight narrower`: the last prompt you gave that session, wrapped to two lines, read from the conversation log as it grows, so it updates the moment you send a new instruction. Slash commands show as their name and arguments.
 
 ### Lobby
 
