@@ -84,7 +84,9 @@ FIGURES = {
     "unknown": [[" ? ", "/|\\", "/ \\"]],
 }
 FIG_W = 3         # 棒人間の幅
-SEAT_W = 13       # 席の幅（名前 6 文字 + 指示回数 [nn] + 隙間 2）
+SEAT_W = 13       # 席の最小幅（名前 6 文字 + 指示回数 [nn] + 隙間 2）
+MAX_SEAT_W = 26   # 席の最大幅（人数が少ないときに広げる）
+CAPTION_LINES = 3  # 足元のキャプション（プロンプト、返答／承認内容）の行数
 BUBBLE_ROWS = 5   # 吹き出し用に空けておく行数（本文 3 行 + 枠 2 行）
 HALL_MARGIN = 2   # 会場の端からステージまでの余白
 TABLE_FILL = 0.8  # ステージの最低幅（会場の使える幅に対する割合）
@@ -419,13 +421,13 @@ def figure_glyphs(a, frame, dim=False):
     return rows
 
 
-def draw_guests(row, view, inner_w, above, x0, y0, lead_x=None, lobby=False):
+def draw_guests(row, view, inner_w, above, x0, y0, lead_x=None, lobby=False, seat_w=SEAT_W):
     """棒人間 1 列ぶん。x0 は席の左端（会場内側の x）、y0 は最初の行の body 行番号。
 
     above=True なら吹き出し→名前→棒人間、False なら棒人間→名前→吹き出し。
     lead_x を渡すと行頭の空白をその幅にする（区画を横に連結するときは 0）。
     """
-    fig_x = (SEAT_W - 2 - FIG_W) // 2
+    fig_x = (seat_w - 2 - FIG_W) // 2
     name_row = ""
     time_row = ""
     fig_rows = ["", "", ""]
@@ -434,7 +436,7 @@ def draw_guests(row, view, inner_w, above, x0, y0, lead_x=None, lobby=False):
     for i, a in enumerate(row):
         key = guest_key(a)
         if key == view.hover_key or (wide is None and key == view.selected_key):
-            wide = (a, x0 + i * SEAT_W + fig_x + 1)
+            wide = (a, x0 + i * seat_w + fig_x + 1)
             if key == view.hover_key:
                 break
     bubble_rows = [""] * BUBBLE_ROWS
@@ -445,7 +447,7 @@ def draw_guests(row, view, inner_w, above, x0, y0, lead_x=None, lobby=False):
         for i, a in enumerate(row):
             if guest_key(a) == view.next_key:
                 st = a.get("agent_status", "unknown")
-                cx = x0 + i * SEAT_W + fig_x + 1
+                cx = x0 + i * seat_w + fig_x + 1
                 glyph = STATUS_COLOR.get(st, "") + BOLD + "▼" + RESET
                 marker_row = BUBBLE_ROWS - 1 if view.frame % 2 == 0 else BUBBLE_ROWS - 2
                 bubble_rows[marker_row] = " " * cx + glyph
@@ -456,8 +458,8 @@ def draw_guests(row, view, inner_w, above, x0, y0, lead_x=None, lobby=False):
         name = view.names[key]
         count = view.prompts.get(a)
         label = f"{name} [{count}]" if count is not None else name
-        pad_l = max(0, (SEAT_W - 2 - wlen(label)) // 2)
-        pad_r = SEAT_W - 2 - wlen(label) - pad_l
+        pad_l = max(0, (seat_w - 2 - wlen(label)) // 2)
+        pad_r = seat_w - 2 - wlen(label) - pad_l
         if key == view.selected_key:
             name_col = BOLD + fg(PINK)
         elif key == view.next_key:
@@ -471,24 +473,24 @@ def draw_guests(row, view, inner_w, above, x0, y0, lead_x=None, lobby=False):
         # 名前の下に、いまの状態になってからの時間を (54s) のように出す
         elapsed = idle_seconds(a, view) if lobby else (view.tracker.elapsed(a) if st in TIMED_STATES else None)
         time_txt = f"({fmt_duration(elapsed)})" if elapsed is not None else ""
-        time_row += fg(SOFT) + wcenter(time_txt, SEAT_W - 2) + RESET + "  "
+        time_row += fg(SOFT) + wcenter(time_txt, seat_w - 2) + RESET + "  "
         glyphs = figure_glyphs(a, view.frame, dim=lobby)
         for k in range(3):
-            fig_rows[k] += " " * fig_x + glyphs[k] + " " * (SEAT_W - fig_x - FIG_W)
-        sx = x0 + i * SEAT_W
-        view.hits.append((sx - 1, sx + SEAT_W - 2, y0, y0 + BUBBLE_ROWS + GUEST_ROWS - 1, ("guest", a)))
+            fig_rows[k] += " " * fig_x + glyphs[k] + " " * (seat_w - fig_x - FIG_W)
+        sx = x0 + i * seat_w
+        view.hits.append((sx - 1, sx + seat_w - 2, y0, y0 + BUBBLE_ROWS + GUEST_ROWS - 1, ("guest", a)))
     lead = " " * (x0 if lead_x is None else lead_x)
     figure_rows = [lead + name_row, lead + time_row] + [lead + r for r in fig_rows]
     return (bubble_rows + figure_rows) if above else (figure_rows + bubble_rows)
 
 
-def stage_top(inner, row, color, seat_x=0):
+def stage_top(inner, row, color, seat_x=0, seat_w=SEAT_W):
     """ステージの天面。自分のいるセッションの足元は明るくしてスポットライトにする。"""
     cells = [color + "▄" + RESET] * inner
-    fig_x = (SEAT_W - 2 - FIG_W) // 2
+    fig_x = (seat_w - 2 - FIG_W) // 2
     for i, a in enumerate(row):
         if a.get("focused"):
-            center = seat_x + i * SEAT_W + fig_x + 1
+            center = seat_x + i * seat_w + fig_x + 1
             for pos in range(center - 2, center + 3):
                 if 0 <= pos < inner:
                     cells[pos] = fg(LEMON) + "▄" + RESET
@@ -549,49 +551,86 @@ def activity_lines(guests, view, inner, pad):
     return out
 
 
+def caption_rows(row, view, seat_w, x0):
+    """台の下に、各人の列幅でプロンプト（と done の返答／blocked の承認内容）を折り返して並べる。"""
+    width = seat_w - 3
+    cols = []
+    for a in row:
+        lines = []
+        prompt = view.prompts.last_prompt(a)
+        if prompt:
+            for i, chunk in enumerate(wwrap(prompt, width, 2)):
+                lines.append((fg(GRAY) + "> " if i == 0 else "  ") + fg(GRAY) + chunk + RESET)
+        st = a.get("agent_status")
+        rest = CAPTION_LINES - len(lines)
+        if st == "done" and rest > 0:
+            reply = view.prompts.last_reply(a)
+            if reply:
+                for i, chunk in enumerate(wwrap(reply, width, rest)):
+                    lines.append((fg(CYAN) + "< " if i == 0 else "  ") + fg(GRAY) + chunk + RESET)
+        elif st == "blocked" and rest > 0:
+            question = view.context.get(a)[1]
+            if question:
+                for i, chunk in enumerate(wwrap(question, width, rest)):
+                    lines.append((fg(RED) + "? " if i == 0 else "  ") + fg(GRAY) + chunk + RESET)
+        cols.append(lines[:CAPTION_LINES])
+    n = max((len(c) for c in cols), default=0)
+    out = []
+    for r in range(n):
+        line = " " * x0
+        for c in cols:
+            cell = c[r] if r < len(c) else ""
+            line += cell + " " * max(0, seat_w - wlen(cell))
+        out.append(line)
+    return out
+
+
+def fit_seat_w(n, inner):
+    """n 人を幅 inner に並べるときの席幅。少人数なら広げ、最大 MAX_SEAT_W。"""
+    if n <= 0:
+        return SEAT_W
+    return max(SEAT_W, min(MAX_SEAT_W, (inner + 2) // n))
+
+
 def render_stage(ws_id, label, guests, view, inner_w, color_n, focused_ws, y_base):
     """ステージひとつぶんの行を返す。y_base は body 内での開始行番号。
 
-    棒人間はステージの上に立つ。1 列に収まらないぶんは後ろの列（上側）に並ぶ。
-    ステージは 1 行の台とその下の space 名。自分のいる場所の足元にスポットライト。
+    上に見出し（リポジトリ名と git の状況）、棒人間、台、足元にその人のプロンプト。
+    1 列に収まらないぶんは後ろの列（上側）に並ぶ。
     """
     color = fg(color_n)
     max_stage_w = max(SEAT_W + 2, inner_w - HALL_MARGIN * 2)
-    min_stage_w = int(max_stage_w * TABLE_FILL)
-    stage_w = min(max_stage_w, max(min_stage_w, wlen(label) + 6))
-    if len(guests) > max(1, (stage_w - 2) // SEAT_W):
-        # 1 列に収まらないなら会場いっぱいまで広げる
-        stage_w = max_stage_w
+    stage_w = max_stage_w
     inner = stage_w - 2
     per_row = max(1, min(len(guests), inner // SEAT_W))
     rows = [guests[i:i + per_row] for i in range(0, len(guests), per_row)]
+    seat_w = fit_seat_w(max(len(r) for r in rows), inner)
     offset = max(HALL_MARGIN, (inner_w - stage_w) // 2)
     pad = " " * offset
 
     def seat_x(n):
-        # n 人ぶんの立ち位置をステージの中央に寄せる（縁の内側基準）
-        return max(0, (inner - (n * SEAT_W - 2)) // 2)
+        return max(0, (inner - (n * seat_w - 2)) // 2)
 
     lines = []
-    # 後ろの列から描く（上に行くほど後ろ）
-    for row in reversed(rows[1:]):
-        lines.extend(draw_guests(row, view, inner_w, True, offset + 1 + seat_x(len(row)), y_base + len(lines)))
-    front_sx = seat_x(len(rows[0]))
-    lines.extend(draw_guests(rows[0], view, inner_w, True, offset + 1 + front_sx, y_base + len(lines)))
-    view.hits.append((offset, offset + stage_w - 1, y_base + len(lines), y_base + len(lines) + 1, ("table", ws_id)))
-    lines.append(pad + " " + stage_top(inner, rows[0], color, seat_x=front_sx))
-    # 出演者の cwd から git の状況を集め、相異なるもの（worktree や別リポジトリ）を並べる
+    # 見出し: リポジトリ名と git の状況
     seen = []
     for a in guests:
         info = view.git.get(a.get("cwd") or a.get("foreground_cwd") or "")
         if info and (info["repo"], info["branch"]) not in [(i["repo"], i["branch"]) for i in seen]:
             seen.append(info)
     git_txt = "  ".join(git_summary(i) for i in seen)
-    name_txt = (BOLD if focused_ws else "") + color + wtrunc(label, inner) + RESET
-    if git_txt and wlen(name_txt) + 2 + wlen(git_txt) <= inner:
-        name_txt = name_txt + "  " + git_txt
-    lines.append(pad + " " + wcenter(name_txt, inner))
-    lines.extend(activity_lines(guests, view, inner, pad))
+    head = (BOLD if focused_ws else "") + color + wtrunc(label, inner) + RESET
+    if git_txt and wlen(head) + 2 + wlen(git_txt) <= inner:
+        head += "  " + git_txt
+    view.hits.append((offset, offset + stage_w - 1, y_base, y_base, ("table", ws_id)))
+    lines.append(pad + " " + head)
+    for row in reversed(rows[1:]):
+        lines.extend(draw_guests(row, view, inner_w, True, offset + 1 + seat_x(len(row)), y_base + len(lines), seat_w=seat_w))
+    front_sx = seat_x(len(rows[0]))
+    lines.extend(draw_guests(rows[0], view, inner_w, True, offset + 1 + front_sx, y_base + len(lines), seat_w=seat_w))
+    view.hits.append((offset, offset + stage_w - 1, y_base + len(lines), y_base + len(lines), ("table", ws_id)))
+    lines.append(pad + " " + stage_top(inner, rows[0], color, seat_x=front_sx, seat_w=seat_w))
+    lines.extend(caption_rows(rows[0], view, seat_w, offset + 1 + front_sx))
     lines.append("")
     return lines
 
@@ -624,30 +663,33 @@ def render_shared_stage(name, sections, view, inner_w, color_n, y_base):
     color = fg(color_n)
     max_stage_w = max(SEAT_W + 2, inner_w - HALL_MARGIN * 2)
     inner = max_stage_w - 2
-    widths = [len(g) * SEAT_W for _, _, _, g in sections]
-    total = sum(widths) + DIVIDER_W * (len(sections) - 1) - 2
-    if total > inner:
+    total_people = sum(len(g) for _, _, _, g in sections)
+    n_div = len(sections) - 1
+    if total_people * SEAT_W + DIVIDER_W * n_div - 2 > inner:
         return None
-    min_stage_w = int(max_stage_w * TABLE_FILL)
-    stage_w = min(max_stage_w, max(min_stage_w, total + 2))
-    inner = stage_w - 2
+    seat_w = max(SEAT_W, min(MAX_SEAT_W, (inner + 2 - DIVIDER_W * n_div) // total_people))
+    widths = [len(g) * seat_w for _, _, _, g in sections]
+    total = sum(widths) + DIVIDER_W * n_div - 2
+    stage_w = max_stage_w
     offset = max(HALL_MARGIN, (inner_w - stage_w) // 2)
     pad = " " * offset
     sx0 = max(0, (inner - total) // 2)
 
     lines = []
-    y0 = y_base
-    parts = []       # 区画ごとの行（行頭空白なし）
-    spans = []       # 区画の (x, 幅)（縁の内側基準）
+    any_focused = any(f for _, _, f, _ in sections)
+    view.hits.append((offset, offset + stage_w - 1, y_base, y_base, ("table", sections[0][1])))
+    lines.append(pad + " " + (BOLD if any_focused else "") + color + wtrunc(name, inner) + RESET)
+    y0 = y_base + len(lines)
+    parts = []
+    spans = []
     x = sx0
     for i, (_, ws_id, _, guests) in enumerate(sections):
-        parts.append(draw_guests(guests, view, inner_w, True, offset + 1 + x, y0, lead_x=0))
+        parts.append(draw_guests(guests, view, inner_w, True, offset + 1 + x, y0, lead_x=0, seat_w=seat_w))
         spans.append((x, widths[i] - 2))
         x += widths[i] + DIVIDER_W
     n_rows = BUBBLE_ROWS + GUEST_ROWS
     for r in range(n_rows):
         if r < BUBBLE_ROWS:
-            # 幅広の吹き出しは絶対位置で 1 区画ぶんしか出ないので、あるものを採用
             lines.append(next((p[r] for p in parts if p[r]), ""))
             continue
         row = pad + " " + " " * sx0
@@ -656,26 +698,31 @@ def render_shared_stage(name, sections, view, inner_w, color_n, y_base):
                 row += fg(SOFT) + "┆" + RESET + " "
             row += p[r]
         lines.append(row)
-    # 区画のクリックは、その worktree の space へ
     for (x, w), (_, ws_id, _, _) in zip(spans, sections):
-        view.hits.append((offset + 1 + x, offset + 1 + x + w - 1, y_base + len(lines), y_base + len(lines) + 2, ("table", ws_id)))
-    front = [g for _, _, _, gs in sections for g in gs]
-    # 天面: 区画ごとの立ち位置を合成
+        view.hits.append((offset + 1 + x, offset + 1 + x + w - 1, y_base + len(lines), y_base + len(lines) + 1, ("table", ws_id)))
     cells = [color + "▄" + RESET] * inner
-    fig_x = (SEAT_W - 2 - FIG_W) // 2
+    fig_x = (seat_w - 2 - FIG_W) // 2
     for (x, _), (_, _, _, guests) in zip(spans, sections):
         for i, a in enumerate(guests):
             if a.get("focused"):
-                center = x + i * SEAT_W + fig_x + 1
+                center = x + i * seat_w + fig_x + 1
                 for pos in range(center - 2, center + 3):
                     if 0 <= pos < inner:
                         cells[pos] = fg(LEMON) + "▄" + RESET
     lines.append(pad + " " + "".join(cells))
     labels = [((BOLD if f else "") + t + RESET) for t, _, f, _ in sections]
     lines.append(pad + " " + place_labels(spans, labels, inner))
-    any_focused = any(f for _, _, f, _ in sections)
-    lines.append(pad + " " + wcenter((BOLD if any_focused else "") + color + wtrunc(name, inner) + RESET, inner))
-    lines.extend(activity_lines(front, view, inner, pad))
+    # 足元のキャプション（区画ごとに列を合わせる）
+    caps = []
+    for (x, _), (_, _, _, guests) in zip(spans, sections):
+        caps.append((x, caption_rows(guests, view, seat_w, 0)))
+    n_cap = max((len(c) for _, c in caps), default=0)
+    for r in range(n_cap):
+        line = ""
+        for x, c in caps:
+            cell = c[r] if r < len(c) else ""
+            line += " " * max(0, x - wlen(line)) + cell
+        lines.append(pad + " " + line)
     lines.append("")
     return lines
 
@@ -754,13 +801,15 @@ def render_lobby(lobby, view, inner_w, y_base):
     title = " lobby "
     side = max(0, (inner_w - wlen(title)) // 2)
     lines.append(fg(SOFT) + "┈" * side + title + "┈" * (inner_w - side - wlen(title)) + RESET)
-    per_row = max(1, (inner_w - HALL_MARGIN * 2) // SEAT_W)
+    inner = inner_w - HALL_MARGIN * 2
+    per_row = max(1, inner // SEAT_W)
     for start in range(0, len(lobby), per_row):
         row = lobby[start:start + per_row]
-        x0 = max(HALL_MARGIN, (inner_w - (len(row) * SEAT_W - 2)) // 2)
-        lines.extend(draw_guests(row, view, inner_w, True, x0, y_base + len(lines), lobby=True))
-        lines.extend(activity_lines(row, view, inner_w - HALL_MARGIN * 2, " " * (HALL_MARGIN - 1)))
-    lines.append("")
+        seat_w = fit_seat_w(len(row), inner)
+        x0 = max(HALL_MARGIN, (inner_w - (len(row) * seat_w - 2)) // 2)
+        lines.extend(draw_guests(row, view, inner_w, True, x0, y_base + len(lines), lobby=True, seat_w=seat_w))
+        lines.extend(caption_rows(row, view, seat_w, x0))
+        lines.append("")
     return lines
 
 

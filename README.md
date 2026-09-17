@@ -7,17 +7,21 @@ Every session is a stick figure and every space (workspace) is a stage.
 You can tell at a glance who is working, who is waiting for your approval, and who has finished and is calling for you.
 
 ```
-       2 dancing   1 waiting   1 done   2 chilling      00:09:29
-                       Matsu 13m   Shizu
+       2 dancing   1 waiting   1 done   1 chilling      00:09:29
+                    ⏎ Matsu 13m   Shizu 1m
 ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
-   Sora [12]   Aoto [3]  Matsu [7]  ┆ Subaru [1]
-     (54s)                (13m)      ┆    (2h)
-      \o/         o        !o!       ┆    \o/
-       |         /|\        |        ┆     |
-      / \        / \       / \       ┆    / \
-  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
-            master ✱3                 feat/x ✱1
-                       herdr-party
+   herdr-party  master ✱3
+                                                   ▼
+        Sora [12]          Aoto [3]      ┆     Matsu [7]
+         (54s)                           ┆       (13m)
+          \o/                o           ┆        !o!
+           |                /|\          ┆         |
+          / \               / \          ┆        / \
+   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+                   master ✱3                     feat/x ✱1
+    > make the stage      > write the        > fix the failing
+      vertical              English README     test
+                          < Done. README.md  ? Bash command: …
 ```
 
 ## Install
@@ -86,15 +90,15 @@ Dependencies: `herdr`, `jq` (launcher), `python3` (viewer, standard library only
 
 ### Stages (spaces)
 
-- A stage is 80% of the venue width by default, and performers stand centered on it. It is just one row of platform with the space name underneath.
+- A stage spans the venue width, and performers stand centered on it with equal spacing. It is one row of platform, with the heading above and captions below.
 - When a single row does not fit, the stage widens to the full venue, and anyone left over stands in a back row (above).
 - Stages are per git repository. Worktrees of the same repository (separate spaces in Herdr) stand on one stage, divided into sections by `┆`. Each section shows its branch and change count underneath (`master ✱3 ↑1`: uncommitted changes, and ahead/behind of the remote), and the stage is named after the repository. Clicking a section jumps to that worktree's space.
 - If the sections do not fit side by side, each becomes its own stage with the same repository name. Spaces outside git use the space label as the stage name.
 - Each space gets its own stage color.
 
-### What you asked each guest
+### Captions under each guest
 
-Under the stage name (and under the lobby rows), every guest gets a line like `Sota > make the spotlight narrower`: the last prompt you gave that session, wrapped to two lines, read from the conversation log as it grows, so it updates the moment you send a new instruction. Slash commands show as their name and arguments. Done guests also get a `< …` line with the start of the reply that finished (from the same log), and blocked guests a `? …` line with what the approval dialog or question is asking (from the pane text).
+Right under each guest's spot on the stage, in that guest's column, sits a caption: `> …` is the last prompt you gave that session (two lines), read from the conversation log as it grows, so it updates the moment you send a new instruction. Done guests also get `< …` with the start of the reply that finished, and blocked guests `? …` with what the approval dialog or question is asking. Seats widen when there are fewer guests (up to 26 columns), so captions get more room. The repository name and git status sit above the stage as a heading; worktree sections show their branch under the stage.
 
 ### Lobby
 
