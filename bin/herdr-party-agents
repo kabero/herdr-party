@@ -19,6 +19,7 @@
   ← → h l    guest を選ぶ（↑ ↓ j k も同じ）
   Tab        要注意（承認待ち・完了）の guest へジャンプ
   Enter / o  選んだ guest のセッションを開く
+  Backspace  直前にいた場所へ戻る（- や b も同じ）
   Esc        選択を解除
   ?          操作の説明を出す / 消す
   q          終了
@@ -341,6 +342,7 @@ class View:
         self.prompts = PromptCounter()
         self.next_key = None  # 「次はここ」の guest（承認待ち → 完了、待ちが長い順の先頭）
         self.lobby_after = LOBBY_AFTER
+        self.focus_history = []  # フォーカスされたペイン ID の履歴（新しいものが末尾。会場自身は除く）
         self.last_seen = {}  # pane_id -> 最後にフォーカスされた時刻（wall clock）
         self.hits = []    # (x0, x1, y0, y1, ("guest", agent) | ("table", ws_id))
 
@@ -868,7 +870,7 @@ def render_header(agents, view, inner_w):
     return lines
 
 
-HELP_TEXT = "Enter 次へ / 選んだ人へ  ←→ 選ぶ  Tab 要注意  Esc 解除  q 終了"
+HELP_TEXT = "Enter 次へ/選んだ人へ  ⌫ 戻る  ←→ 選ぶ  Tab 要注意  Esc 解除  q 終了"
 
 
 def render_party(agents, workspaces, view, cols, rows_n):
@@ -1550,6 +1552,20 @@ def focus_target(target, delay):
     if target[0] == "guest":
         want_ws = target[1].get("workspace_id")
         call = lambda: herdr("agent", "focus", target[1].get("pane_id", ""))
+    elif target[0] == "pane":
+        # 直前の場所へ戻る。agent がいればその agent、いなければそのペインのタブをフォーカスする
+        pane_id = target[1]
+        want_ws = pane_id.split(":")[0]
+        info = herdr("pane", "get", pane_id)
+        tab_id = (((info or {}).get("result") or {}).get("pane") or {}).get("tab_id")
+        has_agent = bool((((info or {}).get("result") or {}).get("pane") or {}).get("agent"))
+
+        def call():
+            if has_agent:
+                res = herdr("agent", "focus", pane_id)
+                if res:
+                    return res
+            return herdr("tab", "focus", tab_id) if tab_id else None
     else:
         want_ws = target[1]
         call = lambda: herdr("workspace", "focus", want_ws)
@@ -1601,6 +1617,8 @@ def parse_input(data):
                 keys.append("enter")
             elif ch == b"\t":
                 keys.append("tab")
+            elif ch in (b"\x7f", b"\x08"):
+                keys.append("backspace")
             else:
                 keys.append(ch.decode("ascii", "replace"))
     return pos, clicks, keys
@@ -1784,6 +1802,10 @@ def main():
                     dirty, focused, tab = watcher.take()
                     if focused is not None:
                         view.last_seen[focused] = time.time()
+                        if not (follower is not None and follower.is_self(focused)):
+                            if not view.focus_history or view.focus_history[-1] != focused:
+                                view.focus_history.append(focused)
+                                del view.focus_history[:-10]
                         if apply_focus(focused):
                             redraw = True
                     if follower is not None and tab is not None:
@@ -1823,6 +1845,11 @@ def main():
                         a = guest_by_key(view.selected_key) or guest_by_key(view.next_key)
                         if a is not None:
                             start_focus(("guest", a), 0)
+                    elif k in ("backspace", "-", "b"):
+                        # 直前の場所へ戻る（履歴の末尾はいまの場所なので、その 1 つ前）
+                        hist = view.focus_history
+                        if len(hist) >= 2:
+                            start_focus(("pane", hist[-2]), 0)
                     elif k == "esc":
                         view.selected_key = None
                         redraw = True
