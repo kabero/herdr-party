@@ -376,10 +376,11 @@ def figure_glyphs(a, frame):
     return rows
 
 
-def draw_guests(row, view, inner_w, above, x0, y0):
+def draw_guests(row, view, inner_w, above, x0, y0, lead_x=None):
     """棒人間 1 列ぶん。x0 は席の左端（会場内側の x）、y0 は最初の行の body 行番号。
 
     above=True なら吹き出し→名前→棒人間、False なら棒人間→名前→吹き出し。
+    lead_x を渡すと行頭の空白をその幅にする（区画を横に連結するときは 0）。
     """
     fig_x = (SEAT_W - 2 - FIG_W) // 2
     name_row = ""
@@ -414,7 +415,7 @@ def draw_guests(row, view, inner_w, above, x0, y0):
             fig_rows[k] += " " * fig_x + glyphs[k] + " " * (SEAT_W - fig_x - FIG_W)
         sx = x0 + i * SEAT_W
         view.hits.append((sx - 1, sx + SEAT_W - 2, y0, y0 + BUBBLE_ROWS + GUEST_ROWS - 1, ("guest", a)))
-    lead = " " * x0
+    lead = " " * (x0 if lead_x is None else lead_x)
     figure_rows = [lead + name_row, lead + time_row] + [lead + r for r in fig_rows]
     return (bubble_rows + figure_rows) if above else (figure_rows + bubble_rows)
 
@@ -478,6 +479,132 @@ def render_stage(ws_id, label, guests, view, inner_w, color_n, focused_ws, y_bas
     return lines
 
 
+DIVIDER_W = 2  # 区画の仕切り "┆ " の幅
+
+
+def place_labels(spans, labels, inner):
+    """各区画の中央にラベルを置く。重なるときは左から順に詰める。"""
+    out = ""
+    cursor = 0
+    for (x, w), label in zip(spans, labels):
+        lw = wlen(label)
+        x_lab = max(cursor, x + (w - lw) // 2)
+        if x_lab + lw > inner:
+            x_lab = max(cursor, inner - lw)
+        if x_lab < cursor:
+            break
+        out += " " * (x_lab - wlen(out)) + label
+        cursor = x_lab + lw + 2
+    return wljust(out, inner)
+
+
+def render_shared_stage(name, sections, view, inner_w, color_n, y_base):
+    """同じリポジトリの worktree を 1 つのステージに並べる。
+
+    sections は [(section_label_text, ws_id, focused_ws, guests), ...]。
+    横に収まらなければ None を返す（呼び出し側で区画ごとのステージに分ける）。
+    """
+    color = fg(color_n)
+    max_stage_w = max(SEAT_W + 2, inner_w - HALL_MARGIN * 2)
+    inner = max_stage_w - 2
+    widths = [len(g) * SEAT_W for _, _, _, g in sections]
+    total = sum(widths) + DIVIDER_W * (len(sections) - 1) - 2
+    if total > inner:
+        return None
+    min_stage_w = int(max_stage_w * TABLE_FILL)
+    stage_w = min(max_stage_w, max(min_stage_w, total + 2))
+    inner = stage_w - 2
+    offset = max(HALL_MARGIN, (inner_w - stage_w) // 2)
+    pad = " " * offset
+    sx0 = max(0, (inner - total) // 2)
+
+    lines = []
+    y0 = y_base
+    parts = []       # 区画ごとの行（行頭空白なし）
+    spans = []       # 区画の (x, 幅)（縁の内側基準）
+    x = sx0
+    for i, (_, ws_id, _, guests) in enumerate(sections):
+        parts.append(draw_guests(guests, view, inner_w, True, offset + 1 + x, y0, lead_x=0))
+        spans.append((x, widths[i] - 2))
+        x += widths[i] + DIVIDER_W
+    n_rows = BUBBLE_ROWS + GUEST_ROWS
+    for r in range(n_rows):
+        if r < BUBBLE_ROWS:
+            # 幅広の吹き出しは絶対位置で 1 区画ぶんしか出ないので、あるものを採用
+            lines.append(next((p[r] for p in parts if p[r]), ""))
+            continue
+        row = pad + " " + " " * sx0
+        for i, p in enumerate(parts):
+            if i:
+                row += fg(SOFT) + "┆" + RESET + " "
+            row += p[r]
+        lines.append(row)
+    # 区画のクリックは、その worktree の space へ
+    for (x, w), (_, ws_id, _, _) in zip(spans, sections):
+        view.hits.append((offset + 1 + x, offset + 1 + x + w - 1, y_base + len(lines), y_base + len(lines) + 2, ("table", ws_id)))
+    front = [g for _, _, _, gs in sections for g in gs]
+    # 天面: 区画ごとの立ち位置を合成
+    cells = [color + "▄" + RESET] * inner
+    fig_x = (SEAT_W - 2 - FIG_W) // 2
+    for (x, _), (_, _, _, guests) in zip(spans, sections):
+        for i, a in enumerate(guests):
+            if a.get("focused"):
+                center = x + i * SEAT_W + fig_x + 1
+                for pos in range(center - 2, center + 3):
+                    if 0 <= pos < inner:
+                        cells[pos] = fg(LEMON) + "█" + RESET
+    lines.append(pad + " " + "".join(cells))
+    labels = [((BOLD if f else "") + t + RESET) for t, _, f, _ in sections]
+    lines.append(pad + " " + place_labels(spans, labels, inner))
+    any_focused = any(f for _, _, f, _ in sections)
+    lines.append(pad + " " + wcenter((BOLD if any_focused else "") + color + wtrunc(name, inner) + RESET, inner))
+    lines.append("")
+    return lines
+
+
+def group_stages(agents, workspaces, view):
+    """出演者をステージにまとめる。git が同じリポジトリなら worktree をまたいで 1 つにする。
+
+    返り値: [(name, [(section_text, ws_id, focused_ws, guests), ...]), ...]
+    """
+    ws_label = {w["workspace_id"]: w.get("label") or w["workspace_id"] for w in workspaces}
+    ws_order = {w["workspace_id"]: w.get("number", 0) for w in workspaces}
+    ws_focused = {w["workspace_id"]: bool(w.get("focused")) for w in workspaces}
+    groups = {}  # key -> {"name", "sections": {skey: {"info", "ws", "guests"}}}
+    for a in agents:
+        ws_id = a["workspace_id"]
+        info = view.git.get(a.get("cwd") or a.get("foreground_cwd") or "")
+        if info:
+            gkey = ("git", info["common"])
+            name = os.path.basename(info["main"].rstrip("/")) or ws_label.get(ws_id, ws_id)
+            skey = (info["repo"], ws_id)
+        else:
+            gkey = ("ws", ws_id)
+            name = ws_label.get(ws_id, ws_id)
+            skey = ("ws", ws_id)
+        g = groups.setdefault(gkey, {"name": name, "sections": {}})
+        sec = g["sections"].setdefault(skey, {"info": info, "ws": ws_id, "guests": []})
+        sec["guests"].append(a)
+
+    def sec_order(item):
+        skey, sec = item
+        info = sec["info"]
+        is_main = 0 if (info and info["repo"] == info["main"]) else 1
+        return (is_main, ws_order.get(sec["ws"], 0), sec["ws"])
+
+    out = []
+    for gkey, g in groups.items():
+        sections = []
+        for skey, sec in sorted(g["sections"].items(), key=sec_order):
+            info = sec["info"]
+            text = git_summary(info) if info else ""
+            sections.append((text, sec["ws"], ws_focused.get(sec["ws"], False), sec["guests"]))
+        first_ws = min((ws_order.get(sec["ws"], 0), sec["ws"]) for sec in g["sections"].values())
+        out.append((first_ws, g["name"], sections))
+    out.sort(key=lambda t: t[0])
+    return [(name, sections) for _, name, sections in out]
+
+
 def attention_list(agents, view):
     """要注意の guest を、待っている時間が長い順に返す。"""
     att = [a for a in agents if a.get("agent_status") in ATTENTION]
@@ -500,12 +627,12 @@ def render_header(agents, view, inner_w):
         st = a.get("agent_status", "unknown")
         counts[st] = counts.get(st, 0) + 1
     # 誰も踊っていないときは虹色のまま止める
-    parts = [rainbow_text(f"◐ {counts['working']} dancing", view.frame if counts["working"] else 0)]
+    parts = [rainbow_text(f"{counts['working']} dancing", view.frame if counts["working"] else 0)]
     if counts["blocked"]:
-        parts.append(f"{fg(RED)}{BOLD}◆ {counts['blocked']} waiting{RESET}")
+        parts.append(f"{fg(RED)}{BOLD}{counts['blocked']} waiting{RESET}")
     if counts["done"]:
-        parts.append(f"{fg(CYAN)}✔ {counts['done']} done{RESET}")
-    parts.append(f"{fg(SAGE)}● {counts['idle']} chilling{RESET}")
+        parts.append(f"{fg(CYAN)}{counts['done']} done{RESET}")
+    parts.append(f"{fg(SAGE)}{counts['idle']} chilling{RESET}")
     stats = "   ".join(parts)
     left = max(0, (inner_w - wlen(stats)) // 2)
     gap = inner_w - left - wlen(stats) - wlen(clock) - 1
@@ -544,16 +671,17 @@ def render_party(agents, workspaces, view, cols, rows_n):
         body.append("")
         body.append(wcenter(fg(GRAY) + "( 会場に誰もいません )" + RESET, inner_w))
     else:
-        ws_label = {w["workspace_id"]: w.get("label") or w["workspace_id"] for w in workspaces}
-        ws_order = {w["workspace_id"]: w.get("number", 0) for w in workspaces}
-        ws_focused = {w["workspace_id"]: bool(w.get("focused")) for w in workspaces}
-        by_ws = {}
-        for a in agents:
-            by_ws.setdefault(a["workspace_id"], []).append(a)
-        for idx, ws_id in enumerate(sorted(by_ws, key=lambda w: (ws_order.get(w, 0), w))):
+        for idx, (name, sections) in enumerate(group_stages(agents, workspaces, view)):
             color_n = TABLE_PALETTE[idx % len(TABLE_PALETTE)]
-            body.extend(render_stage(ws_id, ws_label.get(ws_id, ws_id), by_ws[ws_id], view, inner_w, color_n,
-                                     ws_focused.get(ws_id, False), len(body)))
+            rendered = None
+            if len(sections) > 1:
+                rendered = render_shared_stage(name, sections, view, inner_w, color_n, len(body))
+            if rendered is not None:
+                body.extend(rendered)
+                continue
+            # 区画が 1 つ、または横に収まらないときは区画ごとに別のステージ
+            for text, ws_id, focused_ws, guests in sections:
+                body.extend(render_stage(ws_id, name, guests, view, inner_w, color_n, focused_ws, len(body)))
 
     lines = [wljust(wtrunc_ansi(l, inner_w), inner_w) for l in body]
     if view.show_help:
@@ -645,6 +773,11 @@ def probe_git(cwd):
     top = run("rev-parse", "--show-toplevel")
     if not top:
         return None
+    common = (run("rev-parse", "--path-format=absolute", "--git-common-dir") or "").strip()
+    if not common:
+        common = os.path.join(top.strip(), ".git")
+    # 主 worktree のパス（common dir が <main>/.git のとき）。bare などはそのまま
+    main = os.path.dirname(common) if os.path.basename(common) == ".git" else common
     status = run("status", "--porcelain", "--branch")
     if status is None:
         return None
@@ -662,7 +795,8 @@ def probe_git(cwd):
         ahead = int(am.group(1)) if am else 0
         behind = int(bm.group(1)) if bm else 0
     changes = sum(1 for l in lines[1:] if l.strip())
-    return {"repo": top.strip(), "branch": branch, "changes": changes, "ahead": ahead, "behind": behind}
+    return {"repo": top.strip(), "common": common, "main": main, "branch": branch,
+            "changes": changes, "ahead": ahead, "behind": behind}
 
 
 def git_summary(info):
