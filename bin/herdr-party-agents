@@ -128,7 +128,7 @@ def debug(msg):
     path = os.environ.get("HERDR_PARTY_LOG")
     if path:
         with open(path, "a") as f:
-            f.write(time.strftime("%H:%M:%S ") + msg + "\n")
+            f.write(time.strftime("%H:%M:%S") + f".{int(time.time() * 1000) % 1000:03d} " + msg + "\n")
 
 
 # ---------- 文字幅ユーティリティ ----------
@@ -1049,20 +1049,22 @@ class EventWatcher:
 
 # ---------- 会場のペインの引っ越し（追従） ----------
 
-FOLLOW_SETTLE = 0.25  # 秒。タブ切り替えが連続したときにまとめる
+FOLLOW_SETTLE = 0.05  # 秒。タブ切り替えが連続したときにまとめる
 
 
 class Follower:
     """会場のペインを、ユーザーがいるタブの右側へ引っ越させる。"""
 
-    def __init__(self, width):
+    def __init__(self, width, wake=None):
         self.width = width
+        self.wake = wake  # 引っ越し完了後にメインループを起こして即描画させる
         self.pane_id = os.environ.get("HERDR_PANE_ID", "")
         self.tab_id = os.environ.get("HERDR_TAB_ID", "")
         self.aliases = {self.pane_id}   # 過去の自分のペイン ID（イベントが古い ID で来ることがある）
         self.lock = threading.Lock()
         self.target = None
         self.moving = False
+        self.moved = False
         self.last_move = 0.0
 
     def is_self(self, pane_id):
@@ -1097,7 +1099,10 @@ class Follower:
                 self.tab_id = pane.get("tab_id", target[0])
                 self.aliases.add(self.pane_id)
                 self.last_move = time.monotonic()
+                self.moved = True
                 debug(f"followed to {self.tab_id} as {self.pane_id}")
+                if self.wake:
+                    self.wake()
             else:
                 debug(f"follow move failed: {res}")
 
@@ -1271,7 +1276,7 @@ def main():
     worker = None
     wake_r, wake_w = os.pipe()
     watcher = EventWatcher(wake_w)
-    follower = Follower(width) if (follow and mode == "party" and os.environ.get("HERDR_PANE_ID")) else None
+    follower = Follower(width, watcher.wake) if (follow and mode == "party" and os.environ.get("HERDR_PANE_ID")) else None
     need_fetch = False
 
     def apply_focus(pane_id):
@@ -1370,6 +1375,9 @@ def main():
                     break
                 if wake_r in r:
                     os.read(wake_r, 4096)
+                    if follower is not None and follower.moved:
+                        follower.moved = False
+                        redraw = True  # 引っ越し先のサイズで即描画
                     dirty, focused, tab = watcher.take()
                     if focused is not None:
                         view.last_seen[focused] = time.time()
