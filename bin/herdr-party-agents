@@ -18,7 +18,8 @@
   マウス      棒人間に乗せるとタイトル、クリックでそのセッションを開く
   ← → h l    guest を選ぶ（↑ ↓ j k も同じ）
   Tab        要注意（承認待ち・完了）の guest へジャンプ
-  Enter / o  選んだ guest のセッションを開く
+  Enter / o  選んだ guest（なければ最も対応が必要な guest）のセッションを開く。
+             行き先がなければ、一連のジャンプを始めた場所へ戻る
   delete     直前にいた場所へ戻る（Mac の delete キー = Backspace。- や b も同じ）
   Esc        選択を解除
   ?          操作の説明を出す / 消す
@@ -343,6 +344,7 @@ class View:
         self.next_key = None  # 「次はここ」の guest（承認待ち → 完了、待ちが長い順の先頭）
         self.lobby_after = LOBBY_AFTER
         self.focus_history = []  # フォーカスされたペイン ID の履歴（新しいものが末尾。会場自身は除く）
+        self.home_pane = None    # 一連のジャンプを始めた場所。Enter で行き先がないときにここへ戻る
         self.last_seen = {}  # pane_id -> 最後にフォーカスされた時刻（wall clock）
         self.hits = []    # (x0, x1, y0, y1, ("guest", agent) | ("table", ws_id))
 
@@ -870,7 +872,7 @@ def render_header(agents, view, inner_w):
     return lines
 
 
-HELP_TEXT = "Enter 次へ/選んだ人へ  delete 戻る  ←→ 選ぶ  Tab 要注意  Esc 解除  q 終了"
+HELP_TEXT = "Enter 次へ（なければ最初の場所へ）  delete 直前へ  ←→ 選ぶ  Tab 要注意  q 終了"
 
 
 def render_party(agents, workspaces, view, cols, rows_n):
@@ -1720,6 +1722,10 @@ def main():
         nonlocal worker, mouse_resume_at
         if worker is not None and worker.is_alive():
             return
+        if target[0] in ("guest", "table") and view.home_pane is None and view.focus_history:
+            here = view.focus_history[-1]
+            if not (target[0] == "guest" and target[1].get("pane_id") == here):
+                view.home_pane = here
         sys.stdout.write(MOUSE_OFF)
         sys.stdout.flush()
         mouse_resume_at = time.monotonic() + delay + MOUSE_RESUME_DELAY
@@ -1845,6 +1851,10 @@ def main():
                         a = guest_by_key(view.selected_key) or guest_by_key(view.next_key)
                         if a is not None:
                             start_focus(("guest", a), 0)
+                        elif view.home_pane is not None:
+                            # 行き先がない: 一連のジャンプを始めた場所へ戻る
+                            home, view.home_pane = view.home_pane, None
+                            start_focus(("pane", home), 0)
                     elif k in ("backspace", "-", "b"):
                         # 直前の場所へ戻る（履歴の末尾はいまの場所なので、その 1 つ前）
                         hist = view.focus_history
