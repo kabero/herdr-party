@@ -61,7 +61,8 @@ STATUS_WORD = {"working": "dancing", "blocked": "waiting", "done": "done", "idle
 ICON = {"working": "◐", "blocked": "◆", "done": "✔", "idle": "●", "unknown": "?"}
 TABLE_PALETTE = [PINK, CYAN, LAVENDER, MINT, PEACH, LEMON]
 RAINBOW = [203, 209, 215, 221, 227, 155, 120, 86, 81, 75, 105, 141, 177, 213]  # 稼働中の棒人間を流れる虹色
-ATTENTION = ("blocked", "done")  # 常に吹き出しを出す状態
+ATTENTION = ("blocked", "done")  # 要注意として上部に並べる状態
+BUBBLE_STATES = ("blocked", "done", "working")  # 常に小さな吹き出し（状態と経過時間）を出す状態
 
 # 棒人間のポーズ。状態ごとにフレームを持ち、フレームが複数あるものはアニメーションする。
 FIGURES = {
@@ -242,34 +243,70 @@ def term_size():
     return size.columns, size.lines
 
 
+def state_file_path():
+    base = os.environ.get("HERDR_PLUGIN_STATE_DIR") or os.path.join(
+        os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "herdr-party")
+    return os.path.join(base, "state-since.json")
+
+
 class StateTracker:
-    """guest ごとに、いまの状態になってからの経過時間を覚えておく。"""
+    """guest ごとに、いまの状態になった時刻（wall clock）を覚えておく。
+
+    ファイルに保存しておき、ビューアを開き直しても同じ状態が続いていれば経過時間を引き継ぐ。
+    """
 
     def __init__(self):
-        self.since = {}  # key -> (status, monotonic | None)。None は変化を見ていない（起動時からその状態）
+        self.since = {}  # key -> (status, unix_time | None)。None は変化を見ていない
+        self.path = state_file_path()
+        self.stored = {}
+        try:
+            with open(self.path) as f:
+                self.stored = {k: (v[0], v[1]) for k, v in json.load(f).items()}
+        except (OSError, ValueError, TypeError):
+            self.stored = {}
 
     def update(self, agents):
-        now = time.monotonic()
+        now = time.time()
         seen = set()
+        changed = False
         for a in agents:
             key = guest_key(a)
             seen.add(key)
             st = a.get("agent_status", "unknown")
             prev = self.since.get(key)
             if prev is None:
-                self.since[key] = (st, None)
+                stored = self.stored.get(key)
+                if stored and stored[0] == st and stored[1] is not None:
+                    self.since[key] = (st, stored[1])  # 前回のビューアが見た変化を引き継ぐ
+                else:
+                    self.since[key] = (st, None)
+                    changed = True
             elif prev[0] != st:
                 self.since[key] = (st, now)
+                changed = True
         for key in list(self.since):
             if key not in seen:
                 del self.since[key]
+                changed = True
+        if changed:
+            self.save()
+
+    def save(self):
+        try:
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            tmp = self.path + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump({k: [st, ts] for k, (st, ts) in self.since.items()}, f)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
 
     def elapsed(self, a):
         """いまの状態になってからの秒数。変化を見ていなければ None。"""
         rec = self.since.get(guest_key(a))
         if rec is None or rec[1] is None:
             return None
-        return time.monotonic() - rec[1]
+        return time.time() - rec[1]
 
 
 # ---------- 描画 ----------
@@ -390,7 +427,7 @@ def draw_guests(row, view, inner_w, above, x0, y0):
         glyphs = figure_glyphs(a, view.frame)
         for k in range(3):
             fig_rows[k] += " " * fig_x + glyphs[k] + " " * (SEAT_W - fig_x - FIG_W)
-        if wide is None and st in ATTENTION:
+        if wide is None and st in BUBBLE_STATES:
             mb = mini_bubble(a, view.tracker.elapsed(a), view.frame, "down" if above else "up")
             for k in range(BUBBLE_ROWS):
                 mini[k] += mb[k] + " "
