@@ -7,17 +7,26 @@ Every session is a stick figure and every space (workspace) is a stage.
 You can tell at a glance who is working, who is waiting for your approval, and who has finished and is calling for you.
 
 ```
-       2 dancing   1 waiting   1 done   2 chilling      00:09:29
-                       Matsu 13m   Shizu
+       2 dancing   1 waiting   1 done   1 chilling      00:09:29
+                    ⏎ Matsu 13m   Shizu 1m
 ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
-   Sora [12]   Aoto [3]  Matsu [7]  ┆ Subaru [1]
-     (54s)                (13m)      ┆    (2h)
-      \o/         o        !o!       ┆    \o/
-       |         /|\        |        ┆     |
-      / \        / \       / \       ┆    / \
-  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
-            master ✱3                 feat/x ✱1
-                       herdr-party
+  herdr-party  master ✱3
+  ──────────────────────────────────────────────────────────────
+  \o/  Sora [12]  (54s)
+   |   > make the stage vertical
+  / \
+  ▄▄▄
+  ┈┈ feat/x ✱1 ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
+  !o!  ⏎ Matsu [7]  (13m)
+   |   > fix the failing test in the worktree
+  / \  ? Bash command: rm -rf build
+  ▄▄▄
+  chezmoi  master
+  ──────────────────────────────────────────────────────────────
+  \o   Shizu [4]  (1m)
+   |\  > tidy up the herdr config
+  / \  < Done: moved the tab bar to the bottom and reloaded.
+  ▄▄▄
 ```
 
 ## Install
@@ -84,21 +93,21 @@ Dependencies: `herdr`, `jq` (launcher), `python3` (viewer, standard library only
 - Guests that are working, blocked, or done show how long they have been in that state under their name, like `(54s)`. The time of each state change is saved to `~/.local/state/herdr-party/state-since.json` (or `HERDR_PLUGIN_STATE_DIR` when opened as a plugin pane), so reopening the viewer keeps the elapsed time as long as the state has not changed. A guest whose state change has never been observed shows no time.
 - The stage under the session you are currently in lights up yellow (the spotlight). The name of the focused space is shown in bold.
 
-### Stages (spaces)
+### Groups (repositories and spaces)
 
-- A stage is 80% of the venue width by default, and performers stand centered on it. It is just one row of platform with the space name underneath.
-- When a single row does not fit, the stage widens to the full venue, and anyone left over stands in a back row (above).
-- Stages are per git repository. Worktrees of the same repository (separate spaces in Herdr) stand on one stage, divided into sections by `┆`. Each section shows its branch and change count underneath (`master ✱3 ↑1`: uncommitted changes, and ahead/behind of the remote), and the stage is named after the repository. Clicking a section jumps to that worktree's space.
-- If the sections do not fit side by side, each becomes its own stage with the same repository name. Spaces outside git use the space label as the stage name.
-- Each space gets its own stage color.
+- Guests are grouped by git repository, with the repository name and its branch and change count (`master ✱3 ↑1`: uncommitted changes, ahead/behind of the remote) as a heading. Worktrees of the same repository (separate spaces in Herdr) sit under the same heading, each in its own section marked by a `┈┈ feat/x ✱1 ┈┈` rule. Spaces outside git use the space label as the heading. Clicking a heading or a section rule jumps to that space.
+- Each guest is one card: the stick figure on the left standing on a small platform, and on the right the name, prompt count, elapsed time, and the text lines described below. The platform under the session you are currently in lights up yellow (the spotlight). Headings of the focused space are bold.
 
-### What you asked each guest
+### What each card says
 
-Under the stage name (and under the lobby rows), every guest gets a line like `Sota > make the spotlight narrower`: the last prompt you gave that session, wrapped to two lines, read from the conversation log as it grows, so it updates the moment you send a new instruction. Slash commands show as their name and arguments.
+- `> …` is the last prompt you gave that session, wrapped to two lines, read from the conversation log as it grows, so it updates the moment you send a new instruction. Slash commands show as their name and arguments.
+- `< …` appears on done guests: the start of the reply that finished, from the same log.
+- `? …` appears on blocked guests: what the approval dialog or question is asking, read from the pane text.
+- `見てから 12m` after the name is how long since you last looked at that session.
 
 ### Lobby
 
-Guests that have been idle for a while (30 minutes by default; `--lobby-after MIN`, 0 disables) leave the stages and gather in a lobby at the bottom of the venue, drawn in a dim color with their idle time under the name, longest first. This keeps the stages to the sessions that matter right now. Idle time comes from the state change the viewer observed, or, for sessions that were already idle when the viewer started, from the last entry in the Claude Code conversation log. Lobby guests can still be hovered, selected, and clicked.
+Guests that have been idle for a while (30 minutes by default; `--lobby-after MIN`, 0 disables) leave their groups and gather in a lobby at the bottom of the venue, drawn in a dim color with their idle time next to the name, longest first. This keeps the groups to the sessions that matter right now. Idle time comes from the state change the viewer observed, or, for sessions that were already idle when the viewer started, from the last entry in the Claude Code conversation log. Lobby guests can still be hovered, selected, and clicked.
 
 ### Header
 
@@ -108,12 +117,12 @@ The first line shows the count per state and a clock. The word "dancing" flows i
 
 | Action | Effect |
 | --- | --- |
-| Hover over a figure | A bubble appears: line 1 is state, name, elapsed time, and time since you last looked; line 2 is the last thing you asked (`❯`); line 3 is the start of the last reply (`⏺`) or the pending approval (`?`) |
-| Left-click a figure | Moves Herdr's focus to that session's pane (`herdr agent focus`) |
-| Left-click a stage | Jumps to that space (`herdr workspace focus`) |
-| `←` `→` (also `h` `l` `j` `k` `↑` `↓`) | Selects a guest. The selected guest's name turns pink and its bubble appears |
+| Hover over a card | Highlights it (the name turns pink) |
+| Left-click a card | Moves Herdr's focus to that session's pane (`herdr agent focus`) |
+| Left-click a heading or section rule | Jumps to that space (`herdr workspace focus`) |
+| `↑` `↓` (also `j` `k` `←` `→` `h` `l`) | Selects a guest. The selected guest's name turns pink |
 | `Tab` | Jumps through blocked and done guests |
-| `Enter` / `o` | Opens the selected guest's session. With nothing selected, jumps to the guest who needs you most (blocked first, longest wait first). That guest gets a bobbing `▼` above the head and a bold name in its state color, and is marked `⏎` in the header |
+| `Enter` / `o` | Opens the selected guest's session. With nothing selected, jumps to the guest who needs you most (blocked first, longest wait first). That guest gets a `⏎` before the name, shown bold in its state color, and is marked `⏎` in the header too |
 | `Esc` | Clears the selection |
 | `?` | Shows / hides the help line |
 | `q` | Quits (and closes the pane) |
@@ -149,7 +158,7 @@ Reports expire after 8 seconds, so stopping the viewer restores the sidebar.
 
 ## How it works
 
-- The bubble's "asked", "reply", and "pending approval" lines are pulled from the pane text via `herdr agent read` whenever a session's state changes (the `❯` line, reply lines starting with `⏺`, and the first lines of an approval dialog box). "Since you last looked" is counted from `pane.focused` events.
+- Prompts, replies, and prompt counts come from the Claude Code conversation log (`~/.claude/projects/*/<session-id>.jsonl`), read incrementally. The pending-approval line is pulled from the pane text via `herdr agent read` when a session becomes blocked. "Since you last looked" is counted from `pane.focused` events.
 - The viewer subscribes to `pane.focused`, `pane.agent_status_changed`, `pane.created`, and similar events through Herdr's socket API and reacts the moment they arrive. Focus changes move the spotlight straight from the event's pane_id; everything else triggers a fresh `herdr agent list` and `herdr workspace list`. A 2-second poll remains as a fallback, and the screen redraws every 0.5 seconds.
 - It enables xterm mouse motion tracking (mode 1003), so hover and clicks reach the pane even with Herdr's `mouse_capture` enabled.
 - Herdr clients before 0.9.1 could pull you back to the clicked pane's space right after an API workspace switch (fixed in 0.9.1, changelog #3760 #4153 #4171). On 0.9.0 and earlier the viewer waits 1.2 seconds after the button release before switching, then watches for 2 seconds and switches again if it was pulled back. On 0.9.1 and later the wait is 0.2 seconds. Run `herdr update` to get 0.9.1 or later if clicks should reliably jump.
