@@ -495,8 +495,33 @@ def stage_top(inner, row, color, seat_x=0):
     return "".join(cells)
 
 
+PROMPT_LINES = 2  # 投げたプロンプトを何行まで出すか
+
+
+def wwrap(s, width, max_lines):
+    """表示幅 width で折り返す。max_lines を超えるぶんは最後の行の末尾を … にする。"""
+    lines = []
+    cur, w = "", 0
+    for ch in s:
+        c = cw(ch)
+        if w + c > width:
+            lines.append(cur)
+            cur, w = "", 0
+            if len(lines) == max_lines:
+                break
+        cur += ch
+        w += c
+    else:
+        if cur or not lines:
+            lines.append(cur)
+        return lines[:max_lines]
+    # 収まらなかった: 最後の行を … 付きで詰める
+    lines[-1] = wtrunc(lines[-1] + cur + "\u2026\u2026", width)
+    return lines
+
+
 def activity_lines(guests, view, inner, pad):
-    """ステージ名の下に、人ごとに「名前 ▸ 投げたプロンプト」を 1 行ずつ出す。"""
+    """ステージ名の下に、人ごとに「名前 ▸ 投げたプロンプト」を最大 PROMPT_LINES 行で出す。"""
     out = []
     for a in guests:
         act = view.prompts.last_prompt(a)
@@ -504,8 +529,10 @@ def activity_lines(guests, view, inner, pad):
             continue
         name = view.names.get(guest_key(a), "")
         head = f"{name} ▸ "
-        body = wtrunc(act, max(4, inner - wlen(head)))
-        out.append(pad + " " + fg(NAME) + head + RESET + fg(GRAY) + body + RESET)
+        width = max(4, inner - wlen(head))
+        for i, chunk in enumerate(wwrap(act, width, PROMPT_LINES)):
+            lead = (fg(NAME) + head + RESET) if i == 0 else " " * wlen(head)
+            out.append(pad + " " + lead + fg(GRAY) + chunk + RESET)
     return out
 
 
