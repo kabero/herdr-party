@@ -333,6 +333,7 @@ class View:
         self.git = GitInfo()
         self.context = ContextCache()
         self.prompts = PromptCounter()
+        self.next_key = None  # 「次はここ」の guest（承認待ち → 完了、待ちが長い順の先頭）
         self.last_seen = {}  # pane_id -> 最後にフォーカスされた時刻（wall clock）
         self.hits = []    # (x0, x1, y0, y1, ("guest", agent) | ("table", ws_id))
 
@@ -443,7 +444,12 @@ def draw_guests(row, view, inner_w, above, x0, y0, lead_x=None):
         label = f"{name} [{count}]" if count is not None else name
         pad_l = max(0, (SEAT_W - 2 - wlen(label)) // 2)
         pad_r = SEAT_W - 2 - wlen(label) - pad_l
-        name_col = (BOLD + fg(PINK)) if key == view.selected_key else fg(NAME)
+        if key == view.selected_key:
+            name_col = BOLD + fg(PINK)
+        elif key == view.next_key:
+            name_col = BOLD + STATUS_COLOR.get(st, fg(NAME))  # 次に行くべき人
+        else:
+            name_col = fg(NAME)
         name_row += " " * pad_l + name_col + name + RESET
         if count is not None:
             name_row += fg(SOFT) + f" [{count}]" + RESET
@@ -693,13 +699,14 @@ def render_header(agents, view, inner_w):
             st = a.get("agent_status", "unknown")
             color = STATUS_COLOR.get(st, "")
             dur = fmt_duration(view.tracker.elapsed(a))
-            chips.append(f"{color}{view.names[guest_key(a)]}{RESET}" + (f" {fg(GRAY)}{dur}{RESET}" if dur else ""))
+            mark = (BOLD + "▶ ") if guest_key(a) == view.next_key else ""
+            chips.append(f"{color}{mark}{view.names[guest_key(a)]}{RESET}" + (f" {fg(GRAY)}{dur}{RESET}" if dur else ""))
         lines.append(wcenter("   ".join(chips), inner_w))
     lines.append(fg(SOFT) + "┈" * inner_w + RESET)
     return lines
 
 
-HELP_TEXT = "←→ 選ぶ  Tab 要注意  Enter 開く  Esc 解除  ? 閉じる  q 終了"
+HELP_TEXT = "Enter 次へ / 選んだ人へ  ←→ 選ぶ  Tab 要注意  Esc 解除  q 終了"
 
 
 def render_party(agents, workspaces, view, cols, rows_n):
@@ -707,6 +714,8 @@ def render_party(agents, workspaces, view, cols, rows_n):
     inner_w = max(20, cols)
     view.hits = []
     view.order = [guest_key(a) for a in agents]
+    att = attention_list(agents, view)
+    view.next_key = guest_key(att[0]) if att else None
     body = render_header(agents, view, inner_w)
 
     if not agents:
@@ -1506,7 +1515,7 @@ def main():
                         jump_attention()
                         redraw = True
                     elif k in ("enter", "o"):
-                        a = guest_by_key(view.selected_key)
+                        a = guest_by_key(view.selected_key) or guest_by_key(view.next_key)
                         if a is not None:
                             start_focus(("guest", a), 0)
                     elif k == "esc":

@@ -105,7 +105,7 @@ The first line shows the count per state and a clock. The word "dancing" flows i
 | Left-click a stage | Jumps to that space (`herdr workspace focus`) |
 | `←` `→` (also `h` `l` `j` `k` `↑` `↓`) | Selects a guest. The selected guest's name turns pink and its bubble appears |
 | `Tab` | Jumps through blocked and done guests |
-| `Enter` / `o` | Opens the selected guest's session |
+| `Enter` / `o` | Opens the selected guest's session. With nothing selected, jumps to the guest who needs you most (blocked first, longest wait first). That guest's name is shown in bold in its state color, and marked `▶` in the header |
 | `Esc` | Clears the selection |
 | `?` | Shows / hides the help line |
 | `q` | Quits (and closes the pane) |
