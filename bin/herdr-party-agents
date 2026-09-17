@@ -24,6 +24,7 @@
 
 環境変数 HERDR_PARTY_LOG にファイルパスを入れると、クリックとフォーカスの経過を記録する。
 """
+import glob
 import hashlib
 import json
 import os
@@ -80,7 +81,7 @@ FIGURES = {
     "unknown": [[" ? ", "/|\\", "/ \\"]],
 }
 FIG_W = 3         # 棒人間の幅
-SEAT_W = 8        # 席の幅（名前 6 文字 + 隙間 2）
+SEAT_W = 13       # 席の幅（名前 6 文字 + 指示回数 [nn] + 隙間 2）
 BUBBLE_ROWS = 5   # 吹き出し用に空けておく行数（本文 3 行 + 枠 2 行）
 HALL_MARGIN = 2   # 会場の端からステージまでの余白
 TABLE_FILL = 0.8  # ステージの最低幅（会場の使える幅に対する割合）
@@ -331,6 +332,7 @@ class View:
         self.order = []   # 表示順の guest（キーボード選択用）
         self.git = GitInfo()
         self.context = ContextCache()
+        self.prompts = PromptCounter()
         self.last_seen = {}  # pane_id -> 最後にフォーカスされた時刻（wall clock）
         self.hits = []    # (x0, x1, y0, y1, ("guest", agent) | ("table", ws_id))
 
@@ -345,6 +347,9 @@ def wide_bubble(a, center_x, inner_w, tail_side, view):
     st = a.get("agent_status", "unknown")
     color = STATUS_COLOR.get(st, STATUS_COLOR["unknown"])
     title = view.names.get(guest_key(a), "")
+    count = view.prompts.get(a)
+    if count is not None:
+        title += f" [{count}]"
     elapsed = view.tracker.elapsed(a)
     seen = view.last_seen.get(a.get("pane_id"))
     tail_bits = []
@@ -434,11 +439,15 @@ def draw_guests(row, view, inner_w, above, x0, y0, lead_x=None):
         key = guest_key(a)
         st = a.get("agent_status", "unknown")
         name = view.names[key]
-        name_cell = wcenter(name, SEAT_W - 2) + "  "
-        if key == view.selected_key:
-            name_row += BOLD + fg(PINK) + name_cell + RESET
-        else:
-            name_row += fg(NAME) + name_cell + RESET
+        count = view.prompts.get(a)
+        label = f"{name} [{count}]" if count is not None else name
+        pad_l = max(0, (SEAT_W - 2 - wlen(label)) // 2)
+        pad_r = SEAT_W - 2 - wlen(label) - pad_l
+        name_col = (BOLD + fg(PINK)) if key == view.selected_key else fg(NAME)
+        name_row += " " * pad_l + name_col + name + RESET
+        if count is not None:
+            name_row += fg(SOFT) + f" [{count}]" + RESET
+        name_row += " " * max(0, pad_r) + "  "
         # 名前の下に、いまの状態になってからの時間を (54s) のように出す
         elapsed = view.tracker.elapsed(a) if st in TIMED_STATES else None
         time_txt = f"({fmt_duration(elapsed)})" if elapsed is not None else ""
@@ -756,6 +765,85 @@ def render_list(agents, view, cols, interval, kind_filter):
     lines.append("")
     lines.append(f"{fg(GRAY)}q: quit   {interval}s ごとに更新{RESET}")
     return lines
+
+
+# ---------- 指示の回数（Claude Code の会話ログから） ----------
+
+CLAUDE_PROJECTS = os.path.expanduser("~/.claude/projects")
+
+
+def is_user_prompt(entry):
+    """会話ログの 1 行がユーザーの指示かどうか。ツール結果やシステム由来の行は除く。"""
+    if entry.get("type") != "user" or entry.get("isMeta"):
+        return False
+    content = (entry.get("message") or {}).get("content")
+    if isinstance(content, str):
+        return bool(content.strip())
+    if isinstance(content, list):
+        return not any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content)
+    return False
+
+
+class PromptCounter:
+    """セッション ID から Claude Code の会話ログ（JSONL）を見つけ、指示の回数を差分で数える。"""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.state = {}   # session_id -> {"path", "offset", "count", "buf", "looked"}
+        self.busy = False
+
+    def get(self, a):
+        sid = ((a.get("agent_session") or {}).get("value")) or ""
+        rec = self.state.get(sid)
+        return rec["count"] if rec and rec.get("path") else None
+
+    def refresh(self, agents):
+        with self.lock:
+            if self.busy:
+                return
+            self.busy = True
+        sids = [((a.get("agent_session") or {}).get("value")) or "" for a in agents]
+        threading.Thread(target=self._update, args=([sid for sid in sids if sid],), daemon=True).start()
+
+    def _update(self, sids):
+        try:
+            for sid in sids:
+                rec = self.state.setdefault(sid, {"path": None, "offset": 0, "count": 0, "buf": b"", "looked": 0.0})
+                if rec["path"] is None:
+                    if time.monotonic() - rec["looked"] < 30:
+                        continue
+                    rec["looked"] = time.monotonic()
+                    hits = glob.glob(os.path.join(CLAUDE_PROJECTS, "*", sid + ".jsonl"))
+                    if not hits:
+                        continue
+                    rec["path"] = hits[0]
+                try:
+                    with open(rec["path"], "rb") as f:
+                        f.seek(rec["offset"])
+                        chunk = f.read()
+                except OSError:
+                    continue
+                if not chunk:
+                    continue
+                rec["offset"] += len(chunk)
+                data = rec["buf"] + chunk
+                parts = data.split(b"\n")
+                rec["buf"] = parts.pop()  # 書きかけの最後の行は次回へ
+                added = 0
+                for line in parts:
+                    if not line.strip():
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except ValueError:
+                        continue
+                    if is_user_prompt(entry):
+                        added += 1
+                rec["count"] += added
+        finally:
+            with self.lock:
+                self.busy = False
+
 
 
 # ---------- 文脈スニペット（頼んだこと・応答・承認待ちの内容） ----------
@@ -1343,6 +1431,7 @@ def main():
                     watcher.watch_panes(a.get("pane_id", "") for a in data[0])
                     view.git.refresh([a.get("cwd") or a.get("foreground_cwd") or "" for a in data[0]], force=need_fetch)
                     view.context.refresh(data[0])
+                    view.prompts.refresh(data[0])
                     for a in data[0]:
                         if a.get("focused"):
                             view.last_seen[a.get("pane_id")] = time.time()

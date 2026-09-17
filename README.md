@@ -10,14 +10,14 @@ You can tell at a glance who is working, who is waiting for your approval, and w
        2 dancing   1 waiting   1 done   2 chilling      00:09:29
                        Matsu 13m   Shizu
 ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
-     Sora    Aoto   Matsu   Shizu  ┆ Subaru
-    (54s)           (13m)          ┆  (2h)
-     \o/      o      !o!     \o    ┆  \o/
-      |      /|\      |       |\   ┆   |
-     / \     / \     / \     / \   ┆  / \
-  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
-             master ✱3          feat/x ✱1
-                    herdr-party
+   Sora [12]   Aoto [3]  Matsu [7]  ┆ Subaru [1]
+     (54s)                (13m)      ┆    (2h)
+      \o/         o        !o!       ┆    \o/
+       |         /|\        |        ┆     |
+      / \        / \       / \       ┆    / \
+  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+            master ✱3                 feat/x ✱1
+                       herdr-party
 ```
 
 ## Install
@@ -80,6 +80,7 @@ Dependencies: `herdr`, `jq` (launcher), `python3` (viewer, standard library only
 | ` ? ` | ? | unknown |
 
 - Every guest gets a romanized name derived from its session ID, so the same session keeps the same name across restarts.
+- The number of instructions you have given the session appears next to the name, like `Sota [19]`. It is counted from the Claude Code conversation log (`~/.claude/projects/*/<session-id>.jsonl`, user messages excluding tool results), read incrementally, so it is exact even across viewer restarts. Sessions without a log show no number.
 - Guests that are working, blocked, or done show how long they have been in that state under their name, like `(54s)`. The time of each state change is saved to `~/.local/state/herdr-party/state-since.json` (or `HERDR_PLUGIN_STATE_DIR` when opened as a plugin pane), so reopening the viewer keeps the elapsed time as long as the state has not changed. A guest whose state change has never been observed shows no time.
 - The stage under the session you are currently in lights up yellow (the spotlight). The name of the focused space is shown in bold.
 
