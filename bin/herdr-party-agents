@@ -406,26 +406,27 @@ def draw_guests(row, view, inner_w, above, x0, y0):
     return (bubble_rows + figure_rows) if above else (figure_rows + bubble_rows)
 
 
-def stage_edge(inner, row, color, seat_x=0):
-    """ステージの縁。自分のいるセッションの立ち位置に ◉ を置く。"""
-    chars = ["━"] * inner
+def stage_top(inner, row, color, seat_x=0):
+    """ステージの天面。自分のいるセッションの足元は明るくしてスポットライトにする。"""
+    cells = [color + "▄" + RESET] * inner
     fig_x = (SEAT_W - 2 - FIG_W) // 2
     for i, a in enumerate(row):
         if a.get("focused"):
-            pos = seat_x + i * SEAT_W + fig_x + 1  # 棒人間の中心（縁の内側基準）
-            if 0 <= pos < inner:
-                chars[pos] = "◉"
-    return color + "┏" + "".join(chars) + "┓" + RESET
+            center = seat_x + i * SEAT_W + fig_x + 1
+            for pos in range(center - 2, center + 3):
+                if 0 <= pos < inner:
+                    cells[pos] = fg(LEMON) + "█" + RESET
+    return "".join(cells)
 
 
 def render_stage(ws_id, label, guests, view, inner_w, color_n, focused_ws, y_base):
     """ステージひとつぶんの行を返す。y_base は body 内での開始行番号。
 
     棒人間はステージの上に立つ。1 列に収まらないぶんは後ろの列（上側）に並ぶ。
-    ステージは台形: 上辺が縁、前面にスペース名、底に床のライン。
+    ステージはブロックの台: 天面、前面（スペース名）、下端。自分のいる場所の足元にスポットライト。
     """
     color = fg(color_n)
-    max_stage_w = max(SEAT_W + 2, inner_w - HALL_MARGIN * 2)  # 底辺は左右に 2 ずつ広がる
+    max_stage_w = max(SEAT_W + 4, inner_w - HALL_MARGIN * 2)
     min_stage_w = int(max_stage_w * TABLE_FILL)
     stage_w = min(max_stage_w, max(min_stage_w, wlen(label) + 6))
     if len(guests) > max(1, (stage_w - 2) // SEAT_W):
@@ -447,11 +448,13 @@ def render_stage(ws_id, label, guests, view, inner_w, color_n, focused_ws, y_bas
         lines.extend(draw_guests(row, view, inner_w, True, offset + 1 + seat_x(len(row)), y_base + len(lines)))
     front_sx = seat_x(len(rows[0]))
     lines.extend(draw_guests(rows[0], view, inner_w, True, offset + 1 + front_sx, y_base + len(lines)))
-    view.hits.append((offset - 2, offset + stage_w + 1, y_base + len(lines), y_base + len(lines) + 2, ("table", ws_id)))
-    lines.append(pad + stage_edge(inner, rows[0], color, seat_x=front_sx))
-    deco = wcenter(wtrunc(label, inner), inner)
-    lines.append(" " * (offset - 1) + color + "╱ " + RESET + (BOLD if focused_ws else "") + color + deco + RESET + color + " ╲" + RESET)
-    lines.append(" " * (offset - 2) + color + "╱" + "_" * (inner + 4) + "╲" + RESET)
+    view.hits.append((offset, offset + stage_w - 1, y_base + len(lines), y_base + len(lines) + 2, ("table", ws_id)))
+    lines.append(pad + " " + stage_top(inner, rows[0], color, seat_x=front_sx))
+    label_txt = " " + wtrunc(label, inner - 4) + " "
+    left = (stage_w - wlen(label_txt)) // 2
+    right = stage_w - wlen(label_txt) - left
+    lines.append(pad + color + "█" * left + RESET + (BOLD if focused_ws else "") + color + label_txt + RESET + color + "█" * right + RESET)
+    lines.append(pad + color + "▀" * stage_w + RESET)
     lines.append("")
     return lines
 
