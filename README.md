@@ -98,7 +98,7 @@ Dependencies: `herdr`, `jq` (launcher), `python3` (viewer, standard library only
 
 ### Captions under each guest
 
-Right under each guest's spot on the stage, in that guest's column, sits a caption: `> …` is the last prompt you gave that session (up to three lines), read from the conversation log as it grows, so it updates the moment you send a new instruction. Done guests also get `< …` with the start of the reply that finished, and blocked guests `? …` with what the approval dialog or question is asking. Seats widen when there are fewer guests (up to 26 columns), so captions get more room. The repository name and git status sit above the stage as a banner: white text on a background in the space's color; worktree sections show their branch on the line below the platform.
+Right under each guest's spot on the stage, in that guest's column, sits a caption: `> …` is the last prompt you gave that session (up to three lines), read from the conversation log as it grows, so it updates the moment you send a new instruction. Done guests also get `< …` with the start of the reply that finished, and blocked guests `? …` with what the approval dialog or question is asking. Seats widen when there are fewer guests (up to 26 columns), so captions get more room. The repository name and git status sit right above the guests as a banner: dark text on a background in the same color as the stage; worktree sections show their branch on the line below the platform.
 
 ### Lobby
 
@@ -112,10 +112,10 @@ The first line shows the count per state and a clock. The word "dancing" flows i
 
 | Action | Effect |
 | --- | --- |
-| Hover over a figure | A bubble appears: line 1 is state, name, elapsed time, and time since you last looked; line 2 is the last thing you asked (`❯`); line 3 is the start of the last reply (`⏺`) or the pending approval (`?`) |
+| Hover over a figure | Highlights it (the name turns pink) |
 | Left-click a figure | Moves Herdr's focus to that session's pane (`herdr agent focus`) |
 | Left-click a stage | Jumps to that space (`herdr workspace focus`) |
-| `←` `→` (also `h` `l` `j` `k` `↑` `↓`) | Selects a guest. The selected guest's name turns pink and its bubble appears |
+| `←` `→` (also `h` `l` `j` `k` `↑` `↓`) | Selects a guest. The selected guest's name turns pink |
 | `Tab` | Jumps through blocked and done guests |
 | `Enter` / `o` | Opens the selected guest's session. With nothing selected, jumps to the guest who needs you most (blocked first, longest wait first). When there is no such guest, goes back to where the run of jumps started (the pane you were in before the first jump), and forgets that origin. That guest gets a bobbing `▼` above the head and a bold name in its state color, and is marked `⏎` in the header |
 | `delete` on a Mac keyboard, i.e. Backspace (also `-`, `b`) | Goes back to where you were before the last jump: the previously focused pane (its agent if it has one, otherwise its tab). Focus history comes from `pane.focused` events, so it also covers moves you made outside the party |

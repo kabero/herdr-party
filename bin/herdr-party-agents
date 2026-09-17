@@ -80,8 +80,8 @@ def bg(n):
 
 
 def banner(text, color_n, focused):
-    """白文字に space の色の背景の帯。"""
-    return bg(BANNER_BG.get(color_n, 240)) + fg(WHITE) + (BOLD if focused else "") + " " + text + " " + RESET
+    """space の色（棒人間や台と同じ）を背景にした帯。淡い色なので文字は黒。"""
+    return bg(color_n) + fg(16) + (BOLD if focused else "") + " " + text + " " + RESET
 RAINBOW = [203, 209, 215, 221, 227, 155, 120, 86, 81, 75, 105, 141, 177, 213]  # 稼働中の棒人間を流れる虹色
 ATTENTION = ("blocked", "done")  # 要注意として上部に並べる状態
 TIMED_STATES = ("blocked", "done", "working")  # 名前の下に経過時間を出す状態
@@ -101,7 +101,7 @@ SEAT_W = 13       # 席の最小幅（名前 6 文字 + 指示回数 [nn] + 隙�
 MAX_SEAT_W = 26   # 席の最大幅（人数が少ないときに広げる）
 CAPTION_LINES = 5  # 足元のキャプションの最大行数（プロンプト 3 行 + 返答／承認内容 2 行）
 CAPTION_PROMPT_LINES = 3
-BUBBLE_ROWS = 5   # 吹き出し用に空けておく行数（本文 3 行 + 枠 2 行）
+BUBBLE_ROWS = 1   # 頭上の ▼ マーカー用の行
 HALL_MARGIN = 2   # 会場の端からステージまでの余白
 TABLE_FILL = 0.8  # ステージの最低幅（会場の使える幅に対する割合）
 # クリック後、切り替えるまでの待ち。Herdr 0.9.0 以前はクライアントがクリックしたペインの
@@ -447,26 +447,18 @@ def draw_guests(row, view, inner_w, above, x0, y0, lead_x=None, lobby=False, sea
     name_row = ""
     time_row = ""
     fig_rows = ["", "", ""]
-    # この列で出す幅広の吹き出し（ホバー優先、なければ選択中）
-    wide = None
-    for i, a in enumerate(row):
-        key = guest_key(a)
-        if key == view.hover_key or (wide is None and key == view.selected_key):
-            wide = (a, x0 + i * seat_w + fig_x + 1)
-            if key == view.hover_key:
-                break
+    wide = None  # 吹き出しは廃止（中身はキャプションに出る）
     bubble_rows = [""] * BUBBLE_ROWS
-    if wide is not None:
-        bubble_rows = wide_bubble(wide[0], wide[1], inner_w, "down" if above else "up", view)
-    elif above and not lobby and view.next_key is not None:
+    if above and not lobby and view.next_key is not None:
         # Enter の行き先（次はここ）の頭上に ▼ を出し、0.5 秒ごとに上下させる
         for i, a in enumerate(row):
             if guest_key(a) == view.next_key:
                 st = a.get("agent_status", "unknown")
                 cx = x0 + i * seat_w + fig_x + 1
                 glyph = STATUS_COLOR.get(st, "") + BOLD + "▼" + RESET
-                marker_row = BUBBLE_ROWS - 1 if view.frame % 2 == 0 else BUBBLE_ROWS - 2
-                bubble_rows[marker_row] = " " * cx + glyph
+                # 1 行しかないので、上下の代わりに ▼ と ▾ で揺らす
+                glyph = STATUS_COLOR.get(st, "") + BOLD + ("▼" if view.frame % 2 == 0 else "▾") + RESET
+                bubble_rows[BUBBLE_ROWS - 1] = " " * cx + glyph
                 break
     for i, a in enumerate(row):
         key = guest_key(a)
