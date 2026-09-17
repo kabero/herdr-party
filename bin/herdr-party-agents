@@ -86,7 +86,8 @@ FIGURES = {
 FIG_W = 3         # 棒人間の幅
 SEAT_W = 13       # 席の最小幅（名前 6 文字 + 指示回数 [nn] + 隙間 2）
 MAX_SEAT_W = 26   # 席の最大幅（人数が少ないときに広げる）
-CAPTION_LINES = 3  # 足元のキャプション（プロンプト、返答／承認内容）の行数
+CAPTION_LINES = 5  # 足元のキャプションの最大行数（プロンプト 3 行 + 返答／承認内容 2 行）
+CAPTION_PROMPT_LINES = 3
 BUBBLE_ROWS = 5   # 吹き出し用に空けておく行数（本文 3 行 + 枠 2 行）
 HALL_MARGIN = 2   # 会場の端からステージまでの余白
 TABLE_FILL = 0.8  # ステージの最低幅（会場の使える幅に対する割合）
@@ -559,10 +560,10 @@ def caption_rows(row, view, seat_w, x0):
         lines = []
         prompt = view.prompts.last_prompt(a)
         if prompt:
-            for i, chunk in enumerate(wwrap(prompt, width, 2)):
+            for i, chunk in enumerate(wwrap(prompt, width, CAPTION_PROMPT_LINES)):
                 lines.append((fg(GRAY) + "> " if i == 0 else "  ") + fg(GRAY) + chunk + RESET)
         st = a.get("agent_status")
-        rest = CAPTION_LINES - len(lines)
+        rest = min(2, CAPTION_LINES - len(lines))
         if st == "done" and rest > 0:
             reply = view.prompts.last_reply(a)
             if reply:

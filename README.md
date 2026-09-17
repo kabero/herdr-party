@@ -98,7 +98,7 @@ Dependencies: `herdr`, `jq` (launcher), `python3` (viewer, standard library only
 
 ### Captions under each guest
 
-Right under each guest's spot on the stage, in that guest's column, sits a caption: `> …` is the last prompt you gave that session (two lines), read from the conversation log as it grows, so it updates the moment you send a new instruction. Done guests also get `< …` with the start of the reply that finished, and blocked guests `? …` with what the approval dialog or question is asking. Seats widen when there are fewer guests (up to 26 columns), so captions get more room. The repository name and git status sit above the stage as a heading; worktree sections show their branch under the stage.
+Right under each guest's spot on the stage, in that guest's column, sits a caption: `> …` is the last prompt you gave that session (up to three lines), read from the conversation log as it grows, so it updates the moment you send a new instruction. Done guests also get `< …` with the start of the reply that finished, and blocked guests `? …` with what the approval dialog or question is asking. Seats widen when there are fewer guests (up to 26 columns), so captions get more room. The repository name and git status sit above the stage as a heading; worktree sections show their branch under the stage.
 
 ### Lobby
 
