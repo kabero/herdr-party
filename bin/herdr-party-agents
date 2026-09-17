@@ -1348,14 +1348,10 @@ def probe_git(cwd):
 
 
 def git_summary(info):
-    """`master ✱3 ↑1` のような短い文字列（色つき）。"""
+    """`master ✱3` のような短い文字列（色つき）。未 push の数などリモートとの差は出さない。"""
     parts = [fg(SOFT) + info["branch"] + RESET]
     if info["changes"]:
         parts.append(fg(PEACH) + f"✱{info['changes']}" + RESET)
-    if info["ahead"]:
-        parts.append(fg(SOFT) + f"↑{info['ahead']}" + RESET)
-    if info["behind"]:
-        parts.append(fg(SOFT) + f"↓{info['behind']}" + RESET)
     return " ".join(parts)
 
 

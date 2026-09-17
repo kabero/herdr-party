@@ -92,7 +92,7 @@ Dependencies: `herdr`, `jq` (launcher), `python3` (viewer, standard library only
 
 - A stage spans the venue width, and performers stand centered on it with equal spacing. It is one row of platform, with the banner above and captions below.
 - When a single row does not fit, the stage widens to the full venue, and anyone left over stands in a back row (above).
-- Stages are per git repository. Worktrees of the same repository (separate spaces in Herdr) stand on one stage, divided into sections by `┆`. Each section shows its branch and change count underneath (`master ✱3 ↑1`: uncommitted changes, and ahead/behind of the remote), and the stage is named after the repository. Clicking a section jumps to that worktree's space.
+- Stages are per git repository. Worktrees of the same repository (separate spaces in Herdr) stand on one stage, divided into sections by `┆`. Each section shows its branch and change count underneath (`master ✱3`: branch and number of uncommitted changes), and the stage is named after the repository. Clicking a section jumps to that worktree's space.
 - If the sections do not fit side by side, each becomes its own stage with the same repository name. Spaces outside git use the space label as the stage name.
 - Each space gets its own stage color.
 
