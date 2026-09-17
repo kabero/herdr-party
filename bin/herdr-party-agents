@@ -496,12 +496,12 @@ def stage_top(inner, row, color, seat_x=0):
 
 
 def activity_lines(guests, view, inner, pad):
-    """ステージ名の下に、働いている人ごとに「名前 ▸ いまの作業」を 1 行ずつ出す。"""
+    """ステージ名の下に、idle でない人ごとに「名前 ▸ 投げたプロンプト」を 1 行ずつ出す。"""
     out = []
     for a in guests:
-        if a.get("agent_status") != "working":
+        if a.get("agent_status") not in TIMED_STATES:
             continue
-        act = view.prompts.activity(a)
+        act = view.prompts.last_prompt(a)
         if not act:
             continue
         name = view.names.get(guest_key(a), "")
@@ -884,6 +884,22 @@ def tool_activity(entry):
     return text
 
 
+def prompt_text(entry):
+    """ユーザーの指示の本文（1 行目）。"""
+    content = (entry.get("message") or {}).get("content")
+    if isinstance(content, list):
+        content = next((b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"), "")
+    if not isinstance(content, str):
+        return ""
+    text = content.strip()
+    # /goal などのスラッシュコマンドはコマンド名だけにする
+    m = re.search(r"<command-name>([^<]+)</command-name>", text)
+    if m:
+        args = re.search(r"<command-args>([^<]*)</command-args>", text)
+        text = m.group(1).strip() + ((" " + args.group(1).strip()) if args and args.group(1).strip() else "")
+    return text.splitlines()[0].strip() if text else ""
+
+
 def is_user_prompt(entry):
     """会話ログの 1 行がユーザーの指示かどうか。ツール結果やシステム由来の行は除く。"""
     if entry.get("type") != "user" or entry.get("isMeta"):
@@ -908,6 +924,12 @@ class PromptCounter:
         sid = ((a.get("agent_session") or {}).get("value")) or ""
         rec = self.state.get(sid)
         return rec["count"] if rec and rec.get("path") else None
+
+    def last_prompt(self, a):
+        """最後に投げたプロンプト（1 行目）。なければ None。"""
+        sid = ((a.get("agent_session") or {}).get("value")) or ""
+        rec = self.state.get(sid)
+        return rec.get("last_prompt") if rec else None
 
     def activity(self, a):
         """直近のツール実行の説明（いま何をしているか）。なければ None。"""
@@ -939,7 +961,7 @@ class PromptCounter:
     def _update(self, sids):
         try:
             for sid in sids:
-                rec = self.state.setdefault(sid, {"path": None, "offset": 0, "count": 0, "buf": b"", "looked": 0.0, "last_ts": None, "activity": None})
+                rec = self.state.setdefault(sid, {"path": None, "offset": 0, "count": 0, "buf": b"", "looked": 0.0, "last_ts": None, "activity": None, "last_prompt": None})
                 if rec["path"] is None:
                     if time.monotonic() - rec["looked"] < 30:
                         continue
@@ -974,6 +996,7 @@ class PromptCounter:
                     if is_user_prompt(entry):
                         added += 1
                         rec["activity"] = None  # 新しい依頼が来たら前の作業の説明は消す
+                        rec["last_prompt"] = prompt_text(entry)
                     act = tool_activity(entry)
                     if act:
                         rec["activity"] = act

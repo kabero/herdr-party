@@ -92,9 +92,9 @@ Dependencies: `herdr`, `jq` (launcher), `python3` (viewer, standard library only
 - If the sections do not fit side by side, each becomes its own stage with the same repository name. Spaces outside git use the space label as the stage name.
 - Each space gets its own stage color.
 
-### What each dancer is doing
+### What you asked each guest
 
-Under the stage name, every working guest gets a line like `Sota ▸ Relaunch the pane and commit`. The text is the description Claude Code writes for each tool call (Bash descriptions, or the tool name plus file for edits and searches), taken from the conversation log as it grows, so it changes in real time as the work proceeds and clears when you give a new instruction.
+Under the stage name, every guest who is working, blocked, or done gets a line like `Sota ▸ make the spotlight narrower`: the first line of the last prompt you gave that session, read from the conversation log as it grows, so it updates the moment you send a new instruction. Slash commands show as their name and arguments.
 
 ### Lobby
 
