@@ -37,7 +37,7 @@ GitHub から直接入れる場合は `herdr plugin install kabero/herdr-party` 
 
 ```toml
 [[keys.command]]
-key = "prefix+alt+p"
+key = "prefix+space"
 type = "plugin_action"
 command = "kabe.herdr-party.toggle"
 description = "party pane"
