@@ -58,7 +58,7 @@ def fg(n):
 
 # パレット（256 色）
 PINK, CYAN, LAVENDER, MINT, PEACH, LEMON, RED = 213, 117, 141, 121, 216, 228, 210
-SAGE = 108  # idle 用の控えめな緑
+SAGE = 109  # idle 用の控えめな青灰色（chilling）
 GRAY, SOFT = 245, 240
 NAME = 253  # 棒人間の名前（GRAY だと薄すぎる）
 STATUS_COLOR = {
