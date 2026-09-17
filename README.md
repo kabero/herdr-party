@@ -113,7 +113,7 @@ The first line shows the count per state and a clock. The word "dancing" flows i
 | Action | Effect |
 | --- | --- |
 | Hover over a figure | Highlights it (the name turns pink) |
-| Left-click a figure | Moves Herdr's focus to that session's pane (`herdr agent focus`) |
+| Left-click a figure or its caption | Moves Herdr's focus to that session's pane (`herdr agent focus`) |
 | Left-click a stage | Jumps to that space (`herdr workspace focus`) |
 | `←` `→` (also `h` `l` `j` `k` `↑` `↓`) | Selects a guest. The selected guest's name turns pink |
 | `Tab` | Jumps through blocked and done guests |

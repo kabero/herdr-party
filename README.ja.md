@@ -113,7 +113,7 @@ description = "party pane"
 | 操作 | 動き |
 | --- | --- |
 | 棒人間にマウスを乗せる | その人が強調される（名前がピンクになる） |
-| 棒人間を左クリック | そのセッションのペインに Herdr のフォーカスが移る（`herdr agent focus`） |
+| 棒人間かそのキャプションを左クリック | そのセッションのペインに Herdr のフォーカスが移る（`herdr agent focus`） |
 | ステージを左クリック | その space に移る（`herdr workspace focus`） |
 | `←` `→`（`h` `l` `j` `k` `↑` `↓` も可） | guest を選ぶ。選んだ guest は名前がピンクになる |
 | `Tab` | 承認待ち・完了の guest へ順にジャンプ |

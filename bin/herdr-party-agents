@@ -610,6 +610,15 @@ def caption_rows(row, view, seat_w, x0):
     return out
 
 
+def caption_hits(row, view, seat_w, x0, y0, n_rows):
+    """キャプションの行にも、その人の当たり判定を付ける（クリックで飛べるように）。"""
+    if n_rows <= 0:
+        return
+    for i, a in enumerate(row):
+        sx = x0 + i * seat_w
+        view.hits.append((sx - 1, sx + seat_w - 2, y0, y0 + n_rows - 1, ("guest", a)))
+
+
 def fit_seat_w(n, inner):
     """n 人を幅 inner に並べるときの席幅。少人数なら広げ、最大 MAX_SEAT_W。"""
     if n <= 0:
@@ -656,7 +665,9 @@ def render_stage(ws_id, label, guests, view, inner_w, color_n, focused_ws, y_bas
     lines.extend(draw_guests(rows[0], view, inner_w, True, offset + 1 + front_sx, y_base + len(lines), seat_w=seat_w))
     view.hits.append((offset, offset + stage_w - 1, y_base + len(lines), y_base + len(lines), ("table", ws_id)))
     lines.append(pad + " " + stage_top(inner, rows[0], color, seat_x=front_sx, seat_w=seat_w))
-    lines.extend(caption_rows(rows[0], view, seat_w, offset + 1 + front_sx))
+    caps = caption_rows(rows[0], view, seat_w, offset + 1 + front_sx)
+    caption_hits(rows[0], view, seat_w, offset + 1 + front_sx, y_base + len(lines), len(caps))
+    lines.extend(caps)
     lines.extend([""] * STAGE_GAP)
     return lines
 
@@ -741,6 +752,8 @@ def render_shared_stage(name, sections, view, inner_w, color_n, y_base):
     for (x, _), (_, _, _, guests) in zip(spans, sections):
         caps.append((x, caption_rows(guests, view, seat_w, 0)))
     n_cap = max((len(c) for _, c in caps), default=0)
+    for (x, _), (_, _, _, guests) in zip(spans, sections):
+        caption_hits(guests, view, seat_w, offset + 1 + x, y_base + len(lines), n_cap)
     for r in range(n_cap):
         line = ""
         for x, c in caps:
@@ -832,7 +845,9 @@ def render_lobby(lobby, view, inner_w, y_base):
         seat_w = fit_seat_w(len(row), inner)
         x0 = max(HALL_MARGIN, (inner_w - (len(row) * seat_w - 2)) // 2)
         lines.extend(draw_guests(row, view, inner_w, True, x0, y_base + len(lines), lobby=True, seat_w=seat_w))
-        lines.extend(caption_rows(row, view, seat_w, x0))
+        caps = caption_rows(row, view, seat_w, x0)
+        caption_hits(row, view, seat_w, x0, y_base + len(lines), len(caps))
+        lines.extend(caps)
         lines.append("")
     return lines
 
