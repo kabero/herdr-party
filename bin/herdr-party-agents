@@ -359,8 +359,7 @@ def mini_bubble(a, elapsed, frame, tail_side):
     st = a.get("agent_status", "unknown")
     color = STATUS_COLOR.get(st, STATUS_COLOR["unknown"])
     bw = SEAT_W - 1  # 7
-    text = f"{ICON.get(st, '?')} {fmt_duration(elapsed)}".rstrip()
-    body = wcenter(wtrunc(text, bw - 2), bw - 2)
+    body = wcenter(wtrunc(fmt_duration(elapsed), bw - 2), bw - 2)
     tail = (bw - 2) // 2
     top = ["─"] * (bw - 2)
     bottom = ["─"] * (bw - 2)
@@ -427,7 +426,7 @@ def draw_guests(row, view, inner_w, above, x0, y0):
         glyphs = figure_glyphs(a, view.frame)
         for k in range(3):
             fig_rows[k] += " " * fig_x + glyphs[k] + " " * (SEAT_W - fig_x - FIG_W)
-        if wide is None and st in BUBBLE_STATES:
+        if wide is None and st in BUBBLE_STATES and view.tracker.elapsed(a) is not None:
             mb = mini_bubble(a, view.tracker.elapsed(a), view.frame, "down" if above else "up")
             for k in range(BUBBLE_ROWS):
                 mini[k] += mb[k] + " "
@@ -460,10 +459,10 @@ def render_stage(ws_id, label, guests, view, inner_w, color_n, focused_ws, y_bas
     """ステージひとつぶんの行を返す。y_base は body 内での開始行番号。
 
     棒人間はステージの上に立つ。1 列に収まらないぶんは後ろの列（上側）に並ぶ。
-    ステージはブロックの台: 天面、前面（スペース名）、下端。自分のいる場所の足元にスポットライト。
+    ステージは 1 行の台とその下の space 名。自分のいる場所の足元にスポットライト。
     """
     color = fg(color_n)
-    max_stage_w = max(SEAT_W + 4, inner_w - HALL_MARGIN * 2)
+    max_stage_w = max(SEAT_W + 2, inner_w - HALL_MARGIN * 2)
     min_stage_w = int(max_stage_w * TABLE_FILL)
     stage_w = min(max_stage_w, max(min_stage_w, wlen(label) + 6))
     if len(guests) > max(1, (stage_w - 2) // SEAT_W):
@@ -485,13 +484,10 @@ def render_stage(ws_id, label, guests, view, inner_w, color_n, focused_ws, y_bas
         lines.extend(draw_guests(row, view, inner_w, True, offset + 1 + seat_x(len(row)), y_base + len(lines)))
     front_sx = seat_x(len(rows[0]))
     lines.extend(draw_guests(rows[0], view, inner_w, True, offset + 1 + front_sx, y_base + len(lines)))
-    view.hits.append((offset, offset + stage_w - 1, y_base + len(lines), y_base + len(lines) + 2, ("table", ws_id)))
+    view.hits.append((offset, offset + stage_w - 1, y_base + len(lines), y_base + len(lines) + 1, ("table", ws_id)))
     lines.append(pad + " " + stage_top(inner, rows[0], color, seat_x=front_sx))
-    label_txt = " " + wtrunc(label, inner - 4) + " "
-    left = (stage_w - wlen(label_txt)) // 2
-    right = stage_w - wlen(label_txt) - left
-    lines.append(pad + color + "█" * left + RESET + (BOLD if focused_ws else "") + color + label_txt + RESET + color + "█" * right + RESET)
-    lines.append(pad + color + "▀" * stage_w + RESET)
+    label_txt = wtrunc(label, inner)
+    lines.append(pad + " " + wcenter((BOLD if focused_ws else "") + color + label_txt + RESET, inner))
     lines.append("")
     return lines
 
