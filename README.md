@@ -118,7 +118,7 @@ The first line shows the count per state and a clock. The word "dancing" flows i
 | `←` `→` (also `h` `l` `j` `k` `↑` `↓`) | Selects a guest. The selected guest's name turns pink and its bubble appears |
 | `Tab` | Jumps through blocked and done guests |
 | `Enter` / `o` | Opens the selected guest's session. With nothing selected, jumps to the guest who needs you most (blocked first, longest wait first). That guest gets a bobbing `▼` above the head and a bold name in its state color, and is marked `⏎` in the header |
-| `Backspace` (also `-`, `b`) | Goes back to where you were before the last jump: the previously focused pane (its agent if it has one, otherwise its tab). Focus history comes from `pane.focused` events, so it also covers moves you made outside the party |
+| `delete` on a Mac keyboard, i.e. Backspace (also `-`, `b`) | Goes back to where you were before the last jump: the previously focused pane (its agent if it has one, otherwise its tab). Focus history comes from `pane.focused` events, so it also covers moves you made outside the party |
 | `Esc` | Clears the selection |
 | `?` | Shows / hides the help line |
 | `q` | Quits (and closes the pane) |
