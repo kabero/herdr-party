@@ -92,6 +92,10 @@ Dependencies: `herdr`, `jq` (launcher), `python3` (viewer, standard library only
 - If the sections do not fit side by side, each becomes its own stage with the same repository name. Spaces outside git use the space label as the stage name.
 - Each space gets its own stage color.
 
+### Lobby
+
+Guests that have been idle for a while (30 minutes by default; `--lobby-after MIN`, 0 disables) leave the stages and gather in a lobby at the bottom of the venue, drawn in a dim color with their idle time under the name, longest first. This keeps the stages to the sessions that matter right now. Idle time comes from the state change the viewer observed, or, for sessions that were already idle when the viewer started, from the last entry in the Claude Code conversation log. Lobby guests can still be hovered, selected, and clicked.
+
 ### Header
 
 The first line shows the count per state and a clock. The word "dancing" flows in rainbow colors while somebody is working. When there are blocked or done guests, a second line lists their names and waiting times, blocked first, longest wait first.

@@ -12,6 +12,7 @@
     --follow        タブや space を移動したら会場のペインも移動先の右側へ引っ越す（既定）
     --no-follow     引っ越さない
     --width RATIO   引っ越すときの会場の幅の割合（デフォルト 0.3）
+    --lobby-after MIN  この分数以上 idle の人はステージの下のロビーに集める（デフォルト 30、0 で無効）
 
 操作:
   マウス      棒人間に乗せるとタイトル、クリックでそのセッションを開く
@@ -24,6 +25,7 @@
 
 環境変数 HERDR_PARTY_LOG にファイルパスを入れると、クリックとフォーカスの経過を記録する。
 """
+import datetime
 import glob
 import hashlib
 import json
@@ -71,6 +73,7 @@ RAINBOW = [203, 209, 215, 221, 227, 155, 120, 86, 81, 75, 105, 141, 177, 213]  #
 ATTENTION = ("blocked", "done")  # 要注意として上部に並べる状態
 TIMED_STATES = ("blocked", "done", "working")  # 名前の下に経過時間を出す状態
 GUEST_ROWS = 5  # 名前、時間、棒人間 3 行
+LOBBY_AFTER = 30 * 60  # 秒。これ以上 idle ならロビーへ
 
 # 棒人間のポーズ。状態ごとにフレームを持ち、フレームが複数あるものはアニメーションする。
 FIGURES = {
@@ -334,6 +337,7 @@ class View:
         self.context = ContextCache()
         self.prompts = PromptCounter()
         self.next_key = None  # 「次はここ」の guest（承認待ち → 完了、待ちが長い順の先頭）
+        self.lobby_after = LOBBY_AFTER
         self.last_seen = {}  # pane_id -> 最後にフォーカスされた時刻（wall clock）
         self.hits = []    # (x0, x1, y0, y1, ("guest", agent) | ("table", ws_id))
 
@@ -397,11 +401,11 @@ def wide_bubble(a, center_x, inner_w, tail_side, view):
     return (padding + rows) if tail_side == "down" else (rows + padding)
 
 
-def figure_glyphs(a, frame):
+def figure_glyphs(a, frame, dim=False):
     st = a.get("agent_status", "unknown")
     frames = FIGURES.get(st, FIGURES["unknown"])
     f = frames[frame % len(frames)]
-    color = STATUS_COLOR.get(st, STATUS_COLOR["unknown"])
+    color = fg(SOFT) if dim else STATUS_COLOR.get(st, STATUS_COLOR["unknown"])
     rows = []
     for k in range(3):
         if st == "working":
@@ -415,7 +419,7 @@ def figure_glyphs(a, frame):
     return rows
 
 
-def draw_guests(row, view, inner_w, above, x0, y0, lead_x=None):
+def draw_guests(row, view, inner_w, above, x0, y0, lead_x=None, lobby=False):
     """棒人間 1 列ぶん。x0 は席の左端（会場内側の x）、y0 は最初の行の body 行番号。
 
     above=True なら吹き出し→名前→棒人間、False なら棒人間→名前→吹き出し。
@@ -449,16 +453,16 @@ def draw_guests(row, view, inner_w, above, x0, y0, lead_x=None):
         elif key == view.next_key:
             name_col = BOLD + STATUS_COLOR.get(st, fg(NAME))  # 次に行くべき人
         else:
-            name_col = fg(NAME)
+            name_col = fg(SOFT) if lobby else fg(NAME)
         name_row += " " * pad_l + name_col + name + RESET
         if count is not None:
             name_row += fg(SOFT) + f" [{count}]" + RESET
         name_row += " " * max(0, pad_r) + "  "
         # 名前の下に、いまの状態になってからの時間を (54s) のように出す
-        elapsed = view.tracker.elapsed(a) if st in TIMED_STATES else None
+        elapsed = idle_seconds(a, view) if lobby else (view.tracker.elapsed(a) if st in TIMED_STATES else None)
         time_txt = f"({fmt_duration(elapsed)})" if elapsed is not None else ""
         time_row += fg(SOFT) + wcenter(time_txt, SEAT_W - 2) + RESET + "  "
-        glyphs = figure_glyphs(a, view.frame)
+        glyphs = figure_glyphs(a, view.frame, dim=lobby)
         for k in range(3):
             fig_rows[k] += " " * fig_x + glyphs[k] + " " * (SEAT_W - fig_x - FIG_W)
         sx = x0 + i * SEAT_W
@@ -653,6 +657,47 @@ def group_stages(agents, workspaces, view):
     return [(name, sections) for _, name, sections in out]
 
 
+def idle_seconds(a, view):
+    """idle になってからの秒数。ビューアが変化を見ていなければ会話ログの最終記録から数える。"""
+    if a.get("agent_status") != "idle":
+        return None
+    elapsed = view.tracker.elapsed(a)
+    if elapsed is not None:
+        return elapsed
+    last = view.prompts.last_activity(a)
+    if last is not None:
+        return max(0.0, time.time() - last)
+    return None
+
+
+def split_lobby(agents, view):
+    """ステージに立つ人と、ロビーに下がる人（長く idle）に分ける。"""
+    if view.lobby_after <= 0:
+        return agents, []
+    stage, lobby = [], []
+    for a in agents:
+        sec = idle_seconds(a, view)
+        (lobby if sec is not None and sec >= view.lobby_after else stage).append(a)
+    lobby.sort(key=lambda a: -(idle_seconds(a, view) or 0))
+    return stage, lobby
+
+
+def render_lobby(lobby, view, inner_w, y_base):
+    """ステージの下のロビー。長く idle の人が薄い色で並ぶ。"""
+    lines = []
+    title = " lobby "
+    side = max(0, (inner_w - wlen(title)) // 2)
+    lines.append(fg(SOFT) + "┈" * side + title + "┈" * (inner_w - side - wlen(title)) + RESET)
+    per_row = max(1, (inner_w - HALL_MARGIN * 2) // SEAT_W)
+    for start in range(0, len(lobby), per_row):
+        row = lobby[start:start + per_row]
+        x0 = max(HALL_MARGIN, (inner_w - (len(row) * SEAT_W - 2)) // 2)
+        lines.extend(draw_guests(row, view, inner_w, True, x0, y_base + len(lines), lobby=True))
+    lines.append("")
+    return lines
+
+
+
 def attention_list(agents, view):
     """要注意の guest を、待っている時間が長い順に返す。"""
     att = [a for a in agents if a.get("agent_status") in ATTENTION]
@@ -713,16 +758,17 @@ def render_party(agents, workspaces, view, cols, rows_n):
     """描画行を返す。view.hits と view.order を更新する。"""
     inner_w = max(20, cols)
     view.hits = []
-    view.order = [guest_key(a) for a in agents]
-    att = attention_list(agents, view)
+    stage_agents, lobby = split_lobby(agents, view)
+    att = attention_list(stage_agents, view)
     view.next_key = guest_key(att[0]) if att else None
-    body = render_header(agents, view, inner_w)
+    view.order = [guest_key(a) for a in stage_agents] + [guest_key(a) for a in lobby]
+    body = render_header(stage_agents, view, inner_w)
 
     if not agents:
         body.append("")
         body.append(wcenter(fg(GRAY) + "( 会場に誰もいません )" + RESET, inner_w))
     else:
-        for idx, (name, sections) in enumerate(group_stages(agents, workspaces, view)):
+        for idx, (name, sections) in enumerate(group_stages(stage_agents, workspaces, view)):
             color_n = TABLE_PALETTE[idx % len(TABLE_PALETTE)]
             rendered = None
             if len(sections) > 1:
@@ -734,6 +780,8 @@ def render_party(agents, workspaces, view, cols, rows_n):
             for text, ws_id, focused_ws, guests in sections:
                 body.extend(render_stage(ws_id, name, guests, view, inner_w, color_n, focused_ws, len(body)))
 
+    if lobby:
+        body.extend(render_lobby(lobby, view, inner_w, len(body)))
     lines = [wljust(wtrunc_ansi(l, inner_w), inner_w) for l in body]
     if view.show_help:
         help_line = wcenter(fg(GRAY) + wtrunc(HELP_TEXT, inner_w) + RESET, inner_w)
@@ -806,6 +854,19 @@ class PromptCounter:
         rec = self.state.get(sid)
         return rec["count"] if rec and rec.get("path") else None
 
+    def last_activity(self, a):
+        """会話ログの最終記録時刻（unix 秒）。なければ None。"""
+        sid = ((a.get("agent_session") or {}).get("value")) or ""
+        rec = self.state.get(sid)
+        ts = rec.get("last_ts") if rec else None
+        if not ts:
+            return None
+        try:
+            return datetime.datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return None
+
+
     def refresh(self, agents):
         with self.lock:
             if self.busy:
@@ -817,7 +878,7 @@ class PromptCounter:
     def _update(self, sids):
         try:
             for sid in sids:
-                rec = self.state.setdefault(sid, {"path": None, "offset": 0, "count": 0, "buf": b"", "looked": 0.0})
+                rec = self.state.setdefault(sid, {"path": None, "offset": 0, "count": 0, "buf": b"", "looked": 0.0, "last_ts": None})
                 if rec["path"] is None:
                     if time.monotonic() - rec["looked"] < 30:
                         continue
@@ -846,6 +907,9 @@ class PromptCounter:
                         entry = json.loads(line)
                     except ValueError:
                         continue
+                    ts = entry.get("timestamp")
+                    if isinstance(ts, str):
+                        rec["last_ts"] = ts
                     if is_user_prompt(entry):
                         added += 1
                 rec["count"] += added
@@ -1314,12 +1378,15 @@ def main():
     once = False
     follow = True
     width = 0.3
+    lobby_after = LOBBY_AFTER
     while args:
         a = args.pop(0)
         if a == "--follow":
             follow = True
         elif a == "--no-follow":
             follow = False
+        elif a == "--lobby-after":
+            lobby_after = float(args.pop(0)) * 60 if args else LOBBY_AFTER
         elif a == "--width":
             width = float(args.pop(0)) if args else 0.3
         elif a == "--all":
@@ -1367,6 +1434,7 @@ def main():
     tick = 0.5 if mode == "party" else interval
     click_delay = CLICK_DELAY_OLD if herdr_version() < (0, 9, 1) else CLICK_DELAY
     view = View()
+    view.lobby_after = lobby_after
     data = None
     last_fetch = 0.0
     mouse_resume_at = None
