@@ -325,6 +325,7 @@ class View:
         self.tracker = StateTracker()
         self.names = {}
         self.order = []   # 表示順の guest（キーボード選択用）
+        self.git = GitInfo()
         self.hits = []    # (x0, x1, y0, y1, ("guest", agent) | ("table", ws_id))
 
 
@@ -462,8 +463,17 @@ def render_stage(ws_id, label, guests, view, inner_w, color_n, focused_ws, y_bas
     lines.extend(draw_guests(rows[0], view, inner_w, True, offset + 1 + front_sx, y_base + len(lines)))
     view.hits.append((offset, offset + stage_w - 1, y_base + len(lines), y_base + len(lines) + 1, ("table", ws_id)))
     lines.append(pad + " " + stage_top(inner, rows[0], color, seat_x=front_sx))
-    label_txt = wtrunc(label, inner)
-    lines.append(pad + " " + wcenter((BOLD if focused_ws else "") + color + label_txt + RESET, inner))
+    # 出演者の cwd から git の状況を集め、相異なるもの（worktree や別リポジトリ）を並べる
+    seen = []
+    for a in guests:
+        info = view.git.get(a.get("cwd") or a.get("foreground_cwd") or "")
+        if info and (info["repo"], info["branch"]) not in [(i["repo"], i["branch"]) for i in seen]:
+            seen.append(info)
+    git_txt = "  ".join(git_summary(i) for i in seen)
+    name_txt = (BOLD if focused_ws else "") + color + wtrunc(label, inner) + RESET
+    if git_txt and wlen(name_txt) + 2 + wlen(git_txt) <= inner:
+        name_txt = name_txt + "  " + git_txt
+    lines.append(pad + " " + wcenter(name_txt, inner))
     lines.append("")
     return lines
 
@@ -585,6 +595,86 @@ def render_list(agents, view, cols, interval, kind_filter):
     lines.append("")
     lines.append(f"{fg(GRAY)}q: quit   {interval}s ごとに更新{RESET}")
     return lines
+
+
+# ---------- git の状況 ----------
+
+GIT_REFRESH = 10.0  # 秒。イベントで取り直したときも更新する
+
+
+class GitInfo:
+    """cwd ごとのブランチと変更数を別スレッドで取ってキャッシュする。"""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.cache = {}  # cwd -> {"repo","branch","changes","ahead","behind"} | None
+        self.pending = set()
+        self.last = {}
+
+    def get(self, cwd):
+        with self.lock:
+            return self.cache.get(cwd)
+
+    def refresh(self, cwds, force=False):
+        now = time.monotonic()
+        todo = [c for c in set(cwds) if c and (force or now - self.last.get(c, 0) >= GIT_REFRESH)]
+        with self.lock:
+            todo = [c for c in todo if c not in self.pending]
+            self.pending.update(todo)
+        for c in todo:
+            self.last[c] = now
+        if todo:
+            threading.Thread(target=self._probe_all, args=(todo,), daemon=True).start()
+
+    def _probe_all(self, cwds):
+        for c in cwds:
+            info = probe_git(c)
+            with self.lock:
+                self.cache[c] = info
+                self.pending.discard(c)
+
+
+def probe_git(cwd):
+    def run(*args):
+        try:
+            out = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        return out.stdout if out.returncode == 0 else None
+
+    top = run("rev-parse", "--show-toplevel")
+    if not top:
+        return None
+    status = run("status", "--porcelain", "--branch")
+    if status is None:
+        return None
+    lines = status.splitlines()
+    head = lines[0] if lines and lines[0].startswith("## ") else "## ?"
+    m = re.match(r"## (?:No commits yet on )?([^. \n]+)(?:\.\.\.(\S+))?(?: \[(.*)\])?", head)
+    branch = m.group(1) if m else "?"
+    if branch.startswith("HEAD"):
+        short = run("rev-parse", "--short", "HEAD")
+        branch = "@" + (short or "").strip()
+    ahead = behind = 0
+    if m and m.group(3):
+        am = re.search(r"ahead (\d+)", m.group(3))
+        bm = re.search(r"behind (\d+)", m.group(3))
+        ahead = int(am.group(1)) if am else 0
+        behind = int(bm.group(1)) if bm else 0
+    changes = sum(1 for l in lines[1:] if l.strip())
+    return {"repo": top.strip(), "branch": branch, "changes": changes, "ahead": ahead, "behind": behind}
+
+
+def git_summary(info):
+    """`master ✱3 ↑1` のような短い文字列（色つき）。"""
+    parts = [fg(SOFT) + info["branch"] + RESET]
+    if info["changes"]:
+        parts.append(fg(PEACH) + f"✱{info['changes']}" + RESET)
+    if info["ahead"]:
+        parts.append(fg(SOFT) + f"↑{info['ahead']}" + RESET)
+    if info["behind"]:
+        parts.append(fg(SOFT) + f"↓{info['behind']}" + RESET)
+    return " ".join(parts)
 
 
 # ---------- イベント購読 ----------
@@ -914,6 +1004,7 @@ def main():
                     view.tracker.update(data[0])
                     view.names = assign_names(data[0])
                     watcher.watch_panes(a.get("pane_id", "") for a in data[0])
+                    view.git.refresh([a.get("cwd") or a.get("foreground_cwd") or "" for a in data[0]], force=need_fetch)
                     if report:
                         threading.Thread(target=report_tokens, args=(data[0], view.names, view.frame), daemon=True).start()
                 last_fetch = now
