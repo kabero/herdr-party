@@ -63,7 +63,8 @@ ICON = {"working": "◐", "blocked": "◆", "done": "✔", "idle": "●", "unkno
 TABLE_PALETTE = [PINK, CYAN, LAVENDER, MINT, PEACH, LEMON]
 RAINBOW = [203, 209, 215, 221, 227, 155, 120, 86, 81, 75, 105, 141, 177, 213]  # 稼働中の棒人間を流れる虹色
 ATTENTION = ("blocked", "done")  # 要注意として上部に並べる状態
-BUBBLE_STATES = ("blocked", "done", "working")  # 常に小さな吹き出し（状態と経過時間）を出す状態
+TIMED_STATES = ("blocked", "done", "working")  # 名前の下に経過時間を出す状態
+GUEST_ROWS = 5  # 名前、時間、棒人間 3 行
 
 # 棒人間のポーズ。状態ごとにフレームを持ち、フレームが複数あるものはアニメーションする。
 FIGURES = {
@@ -355,28 +356,6 @@ def wide_bubble(a, center_x, inner_w, tail_side, elapsed):
     return [" " * x + r for r in rows]
 
 
-def mini_bubble(a, elapsed, frame, tail_side):
-    """要注意の guest に常時出す、席の幅に収まる小さな吹き出し。"""
-    st = a.get("agent_status", "unknown")
-    color = STATUS_COLOR.get(st, STATUS_COLOR["unknown"])
-    bw = SEAT_W - 1  # 7
-    body = wcenter(wtrunc(fmt_duration(elapsed), bw - 2), bw - 2)
-    tail = (bw - 2) // 2
-    top = ["─"] * (bw - 2)
-    bottom = ["─"] * (bw - 2)
-    if tail_side == "down":
-        bottom[tail] = "┬"
-    else:
-        top[tail] = "┴"
-    # 承認待ちは 1 秒ごとに明滅させて目を引く
-    emphasis = BOLD if (st != "blocked" or frame % 4 < 2) else ""
-    return [
-        color + "╭" + "".join(top) + "╮" + RESET,
-        color + "│" + RESET + emphasis + color + body + RESET + color + "│" + RESET,
-        color + "╰" + "".join(bottom) + "╯" + RESET,
-    ]
-
-
 def figure_glyphs(a, frame):
     st = a.get("agent_status", "unknown")
     frames = FIGURES.get(st, FIGURES["unknown"])
@@ -402,6 +381,7 @@ def draw_guests(row, view, inner_w, above, x0, y0):
     """
     fig_x = (SEAT_W - 2 - FIG_W) // 2
     name_row = ""
+    time_row = ""
     fig_rows = ["", "", ""]
     # この列で出す幅広の吹き出し（ホバー優先、なければ選択中）
     wide = None
@@ -414,7 +394,6 @@ def draw_guests(row, view, inner_w, above, x0, y0):
     bubble_rows = [""] * BUBBLE_ROWS
     if wide is not None:
         bubble_rows = wide_bubble(wide[0], wide[1], inner_w, "down" if above else "up", view.tracker.elapsed(wide[0]))
-    mini = [""] * BUBBLE_ROWS
     for i, a in enumerate(row):
         key = guest_key(a)
         st = a.get("agent_status", "unknown")
@@ -424,22 +403,17 @@ def draw_guests(row, view, inner_w, above, x0, y0):
             name_row += BOLD + fg(PINK) + name_cell + RESET
         else:
             name_row += fg(GRAY) + name_cell + RESET
+        # 名前の下に、いまの状態になってからの時間を (54s) のように出す
+        elapsed = view.tracker.elapsed(a) if st in TIMED_STATES else None
+        time_txt = f"({fmt_duration(elapsed)})" if elapsed is not None else ""
+        time_row += fg(SOFT) + wcenter(time_txt, SEAT_W - 2) + RESET + "  "
         glyphs = figure_glyphs(a, view.frame)
         for k in range(3):
             fig_rows[k] += " " * fig_x + glyphs[k] + " " * (SEAT_W - fig_x - FIG_W)
-        if wide is None and st in BUBBLE_STATES and view.tracker.elapsed(a) is not None:
-            mb = mini_bubble(a, view.tracker.elapsed(a), view.frame, "down" if above else "up")
-            for k in range(BUBBLE_ROWS):
-                mini[k] += mb[k] + " "
-        else:
-            for k in range(BUBBLE_ROWS):
-                mini[k] += " " * SEAT_W
         sx = x0 + i * SEAT_W
-        view.hits.append((sx - 1, sx + SEAT_W - 2, y0, y0 + BUBBLE_ROWS + 3, ("guest", a)))
-    if wide is None:
-        bubble_rows = [" " * x0 + m for m in mini]
+        view.hits.append((sx - 1, sx + SEAT_W - 2, y0, y0 + BUBBLE_ROWS + GUEST_ROWS - 1, ("guest", a)))
     lead = " " * x0
-    figure_rows = [lead + name_row] + [lead + r for r in fig_rows]
+    figure_rows = [lead + name_row, lead + time_row] + [lead + r for r in fig_rows]
     return (bubble_rows + figure_rows) if above else (figure_rows + bubble_rows)
 
 
