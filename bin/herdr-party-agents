@@ -49,12 +49,13 @@ def fg(n):
 
 # パレット（256 色）
 PINK, CYAN, LAVENDER, MINT, PEACH, LEMON, RED = 213, 117, 141, 121, 216, 228, 210
+SAGE = 108  # idle 用の控えめな緑
 GRAY, SOFT = 245, 240
 STATUS_COLOR = {
     "working": fg(LEMON),
     "blocked": fg(RED),
     "done": fg(CYAN),
-    "idle": fg(MINT),
+    "idle": fg(SAGE),
     "unknown": fg(GRAY),
 }
 STATUS_WORD = {"working": "dancing", "blocked": "waiting", "done": "done", "idle": "chilling", "unknown": "?"}
@@ -510,7 +511,7 @@ def render_header(agents, view, inner_w):
         parts.append(f"{fg(RED)}{BOLD}◆ {counts['blocked']} waiting{RESET}")
     if counts["done"]:
         parts.append(f"{fg(CYAN)}✔ {counts['done']} done{RESET}")
-    parts.append(f"{fg(MINT)}● {counts['idle']} chilling{RESET}")
+    parts.append(f"{fg(SAGE)}● {counts['idle']} chilling{RESET}")
     stats = "   ".join(parts)
     left = max(0, (inner_w - wlen(stats)) // 2)
     gap = inner_w - left - wlen(stats) - wlen(clock) - 1
