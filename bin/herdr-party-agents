@@ -77,7 +77,7 @@ FIGURES = {
 }
 FIG_W = 3         # 棒人間の幅
 SEAT_W = 8        # 席の幅（名前 6 文字 + 隙間 2）
-BUBBLE_ROWS = 3   # 吹き出し用に空けておく行数
+BUBBLE_ROWS = 5   # 吹き出し用に空けておく行数（本文 3 行 + 枠 2 行）
 HALL_MARGIN = 2   # 会場の端からステージまでの余白
 TABLE_FILL = 0.8  # ステージの最低幅（会場の使える幅に対する割合）
 # クリック後、切り替えるまでの待ち。Herdr 0.9.0 以前はクライアントがクリックしたペインの
@@ -326,17 +326,47 @@ class View:
         self.names = {}
         self.order = []   # 表示順の guest（キーボード選択用）
         self.git = GitInfo()
+        self.context = ContextCache()
+        self.last_seen = {}  # pane_id -> 最後にフォーカスされた時刻（wall clock）
         self.hits = []    # (x0, x1, y0, y1, ("guest", agent) | ("table", ws_id))
 
 
-def wide_bubble(a, center_x, inner_w, tail_side, elapsed):
-    """ホバー中／選択中の guest の吹き出し。会場の内側 (幅 inner_w) に収まる位置に置く。"""
+def wide_bubble(a, center_x, inner_w, tail_side, view):
+    """ホバー中／選択中の guest の吹き出し。会場の内側 (幅 inner_w) に収まる位置に置く。
+
+    1 行目: 状態・タイトル・経過時間・最後に見てからの時間
+    2 行目: 最後に頼んだこと（❯）
+    3 行目: 最後の応答の冒頭（⏺）か、承認待ちの内容
+    """
     st = a.get("agent_status", "unknown")
     color = STATUS_COLOR.get(st, STATUS_COLOR["unknown"])
     title = a.get("terminal_title_stripped") or a.get("terminal_title") or "-"
-    tail_txt = f" {fmt_duration(elapsed)}" if elapsed is not None else ""
-    max_body = max(8, inner_w - HALL_MARGIN * 2 - 4)
-    body_w = min(max_body, wlen(title) + 2 + wlen(tail_txt))
+    elapsed = view.tracker.elapsed(a)
+    seen = view.last_seen.get(a.get("pane_id"))
+    tail_bits = []
+    if elapsed is not None:
+        tail_bits.append(fmt_duration(elapsed))
+    if seen is not None and not a.get("focused"):
+        tail_bits.append(f"見てから {fmt_duration(time.time() - seen)}")
+    tail_txt = ("  " + " · ".join(tail_bits)) if tail_bits else ""
+    asked, answer = view.context.get(a)
+    rows_txt = []
+    max_body = max(12, inner_w - HALL_MARGIN * 2 - 4)
+    want = wlen(title) + 2 + wlen(tail_txt)
+    if asked:
+        want = max(want, wlen(asked) + 2)
+    if answer:
+        want = max(want, wlen(answer) + 2)
+    body_w = min(max_body, want)
+    text_w = body_w - 2 - wlen(tail_txt)
+    if text_w < 6:
+        tail_txt, text_w = "", body_w - 2
+    rows_txt.append(color + ICON.get(st, "?") + RESET + " " + BOLD + wljust(wtrunc(title, text_w), text_w) + RESET + fg(GRAY) + tail_txt + RESET)
+    if asked:
+        rows_txt.append(fg(SOFT) + "❯ " + RESET + wljust(wtrunc(asked, body_w - 2), body_w - 2))
+    if answer:
+        mark = (fg(RED) + "? ") if st == "blocked" else (fg(SOFT) + "⏺ ")
+        rows_txt.append(mark + RESET + fg(GRAY) + wljust(wtrunc(answer, body_w - 2), body_w - 2) + RESET)
     bw = body_w + 4
     x = max(HALL_MARGIN, min(center_x - bw // 2, inner_w - HALL_MARGIN - bw))
     tail = center_x - x - 1
@@ -348,14 +378,13 @@ def wide_bubble(a, center_x, inner_w, tail_side, elapsed):
         else:
             top[tail] = "┴"
     border = fg(SOFT)
-    text_w = body_w - 2 - wlen(tail_txt)
-    line = color + ICON.get(st, "?") + RESET + " " + BOLD + wljust(wtrunc(title, text_w), text_w) + RESET + fg(GRAY) + tail_txt + RESET
-    rows = [
-        border + "╭" + "".join(top) + "╮" + RESET,
-        border + "│" + RESET + " " + line + " " + border + "│" + RESET,
-        border + "╰" + "".join(bottom) + "╯" + RESET,
-    ]
-    return [" " * x + r for r in rows]
+    rows = [border + "╭" + "".join(top) + "╮" + RESET]
+    rows += [border + "│" + RESET + " " + r + " " + border + "│" + RESET for r in rows_txt]
+    rows.append(border + "╰" + "".join(bottom) + "╯" + RESET)
+    rows = [" " * x + r for r in rows]
+    # 予約した行数に合わせ、上側の客なら上を、下側なら下を空ける
+    padding = [""] * max(0, BUBBLE_ROWS - len(rows))
+    return (padding + rows) if tail_side == "down" else (rows + padding)
 
 
 def figure_glyphs(a, frame):
@@ -396,7 +425,7 @@ def draw_guests(row, view, inner_w, above, x0, y0, lead_x=None):
                 break
     bubble_rows = [""] * BUBBLE_ROWS
     if wide is not None:
-        bubble_rows = wide_bubble(wide[0], wide[1], inner_w, "down" if above else "up", view.tracker.elapsed(wide[0]))
+        bubble_rows = wide_bubble(wide[0], wide[1], inner_w, "down" if above else "up", view)
     for i, a in enumerate(row):
         key = guest_key(a)
         st = a.get("agent_status", "unknown")
@@ -723,6 +752,100 @@ def render_list(agents, view, cols, interval, kind_filter):
     lines.append("")
     lines.append(f"{fg(GRAY)}q: quit   {interval}s ごとに更新{RESET}")
     return lines
+
+
+# ---------- 文脈スニペット（頼んだこと・応答・承認待ちの内容） ----------
+
+TOOL_CALL_RE = re.compile(r"^⏺ [A-Za-z][A-Za-z0-9_]*\(")
+
+
+def herdr_text(*args):
+    try:
+        out = subprocess.run([HERDR_BIN, *args], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return out.stdout if out.returncode == 0 else ""
+
+
+def extract_context(recent, detection, status):
+    """画面テキストから (最後に頼んだこと, 最後の応答の冒頭 or 承認待ちの内容) を取り出す。"""
+    asked = ""
+    answer = ""
+    for line in recent.splitlines():
+        t = line.strip()
+        if t.startswith("❯ ") and len(t) > 2:
+            asked = t[2:].strip()
+        elif t.startswith("⏺ ") and not TOOL_CALL_RE.match(t) and len(t) > 2:
+            answer = t[2:].strip()
+    if status == "blocked":
+        question = extract_question(detection)
+        if question:
+            answer = question
+    return asked, answer
+
+
+def extract_question(detection):
+    """承認ダイアログや質問の箱から、種類と内容の 1 行を作る。"""
+    lines = [l.rstrip() for l in detection.splitlines()]
+    box = []
+    for l in reversed(lines):
+        t = l.strip()
+        if t.startswith("╰"):
+            box = []
+            continue
+        if t.startswith("╭"):
+            break
+        if t.startswith("│"):
+            inner = t.strip("│").strip()
+            if inner:
+                box.insert(0, inner)
+    box = [b for b in box if not re.match(r"^(❯\s*)?\d+\.", b) and not b.startswith("Esc")]
+    if box:
+        head = box[0]
+        detail = next((b for b in box[1:] if not b.lower().startswith("do you want")), "")
+        return f"{head}: {detail}" if detail else head
+    for l in reversed(lines):
+        t = l.strip()
+        if "?" in t or "？" in t:
+            return t.lstrip("│ ").rstrip("│ ")
+    return ""
+
+
+class ContextCache:
+    """guest ごとの文脈スニペット。状態が変わったときに別スレッドで取り直す。"""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.cache = {}    # key -> (status, asked, answer)
+        self.pending = set()
+
+    def get(self, a):
+        rec = self.cache.get(guest_key(a))
+        if rec is None or rec[0] != a.get("agent_status"):
+            return "", ""
+        return rec[1], rec[2]
+
+    def refresh(self, agents):
+        todo = []
+        with self.lock:
+            for a in agents:
+                key = guest_key(a)
+                st = a.get("agent_status", "unknown")
+                rec = self.cache.get(key)
+                if (rec is None or rec[0] != st) and key not in self.pending:
+                    self.pending.add(key)
+                    todo.append((key, st, a.get("pane_id", "")))
+        if todo:
+            threading.Thread(target=self._fetch_all, args=(todo,), daemon=True).start()
+
+    def _fetch_all(self, todo):
+        for key, st, pane_id in todo:
+            recent = herdr_text("agent", "read", pane_id, "--source", "recent-unwrapped", "--lines", "120")
+            detection = herdr_text("agent", "read", pane_id, "--source", "detection", "--lines", "40") if st == "blocked" else ""
+            asked, answer = extract_context(recent, detection, st)
+            with self.lock:
+                self.cache[key] = (st, asked, answer)
+                self.pending.discard(key)
 
 
 # ---------- git の状況 ----------
@@ -1139,6 +1262,10 @@ def main():
                     view.names = assign_names(data[0])
                     watcher.watch_panes(a.get("pane_id", "") for a in data[0])
                     view.git.refresh([a.get("cwd") or a.get("foreground_cwd") or "" for a in data[0]], force=need_fetch)
+                    view.context.refresh(data[0])
+                    for a in data[0]:
+                        if a.get("focused"):
+                            view.last_seen[a.get("pane_id")] = time.time()
                     if report:
                         threading.Thread(target=report_tokens, args=(data[0], view.names, view.frame), daemon=True).start()
                 last_fetch = now
@@ -1169,8 +1296,10 @@ def main():
                 if wake_r in r:
                     os.read(wake_r, 4096)
                     dirty, focused = watcher.take()
-                    if focused is not None and apply_focus(focused):
-                        redraw = True
+                    if focused is not None:
+                        view.last_seen[focused] = time.time()
+                        if apply_focus(focused):
+                            redraw = True
                     if dirty:
                         need_fetch = True
                         redraw = True
