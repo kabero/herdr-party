@@ -92,6 +92,10 @@ Dependencies: `herdr`, `jq` (launcher), `python3` (viewer, standard library only
 - If the sections do not fit side by side, each becomes its own stage with the same repository name. Spaces outside git use the space label as the stage name.
 - Each space gets its own stage color.
 
+### What each dancer is doing
+
+Under the stage name, every working guest gets a line like `Sota ▸ Relaunch the pane and commit`. The text is the description Claude Code writes for each tool call (Bash descriptions, or the tool name plus file for edits and searches), taken from the conversation log as it grows, so it changes in real time as the work proceeds and clears when you give a new instruction.
+
 ### Lobby
 
 Guests that have been idle for a while (30 minutes by default; `--lobby-after MIN`, 0 disables) leave the stages and gather in a lobby at the bottom of the venue, drawn in a dim color with their idle time under the name, longest first. This keeps the stages to the sessions that matter right now. Idle time comes from the state change the viewer observed, or, for sessions that were already idle when the viewer started, from the last entry in the Claude Code conversation log. Lobby guests can still be hovered, selected, and clicked.

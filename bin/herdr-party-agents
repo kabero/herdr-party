@@ -495,6 +495,22 @@ def stage_top(inner, row, color, seat_x=0):
     return "".join(cells)
 
 
+def activity_lines(guests, view, inner, pad):
+    """ステージ名の下に、働いている人ごとに「名前 ▸ いまの作業」を 1 行ずつ出す。"""
+    out = []
+    for a in guests:
+        if a.get("agent_status") != "working":
+            continue
+        act = view.prompts.activity(a)
+        if not act:
+            continue
+        name = view.names.get(guest_key(a), "")
+        head = f"{name} ▸ "
+        body = wtrunc(act, max(4, inner - wlen(head)))
+        out.append(pad + " " + fg(NAME) + head + RESET + fg(GRAY) + body + RESET)
+    return out
+
+
 def render_stage(ws_id, label, guests, view, inner_w, color_n, focused_ws, y_base):
     """ステージひとつぶんの行を返す。y_base は body 内での開始行番号。
 
@@ -537,6 +553,7 @@ def render_stage(ws_id, label, guests, view, inner_w, color_n, focused_ws, y_bas
     if git_txt and wlen(name_txt) + 2 + wlen(git_txt) <= inner:
         name_txt = name_txt + "  " + git_txt
     lines.append(pad + " " + wcenter(name_txt, inner))
+    lines.extend(activity_lines(guests, view, inner, pad))
     lines.append("")
     return lines
 
@@ -620,6 +637,7 @@ def render_shared_stage(name, sections, view, inner_w, color_n, y_base):
     lines.append(pad + " " + place_labels(spans, labels, inner))
     any_focused = any(f for _, _, f, _ in sections)
     lines.append(pad + " " + wcenter((BOLD if any_focused else "") + color + wtrunc(name, inner) + RESET, inner))
+    lines.extend(activity_lines(front, view, inner, pad))
     lines.append("")
     return lines
 
@@ -839,6 +857,33 @@ def render_list(agents, view, cols, interval, kind_filter):
 CLAUDE_PROJECTS = os.path.expanduser("~/.claude/projects")
 
 
+def tool_activity(entry):
+    """assistant の行からツール実行の要約を 1 つ取り出す。なければ None。"""
+    if entry.get("type") != "assistant":
+        return None
+    content = (entry.get("message") or {}).get("content")
+    if not isinstance(content, list):
+        return None
+    text = None
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "tool_use":
+            continue
+        name = block.get("name") or "?"
+        inp = block.get("input") or {}
+        desc = inp.get("description") if isinstance(inp.get("description"), str) else None
+        if desc:
+            text = desc.strip()
+        elif isinstance(inp.get("file_path"), str):
+            text = f"{name} {os.path.basename(inp['file_path'])}"
+        elif isinstance(inp.get("pattern"), str):
+            text = f"{name} {inp['pattern']}"
+        elif isinstance(inp.get("prompt"), str):
+            text = f"{name}: {inp['prompt'].strip().splitlines()[0][:60]}"
+        else:
+            text = name
+    return text
+
+
 def is_user_prompt(entry):
     """会話ログの 1 行がユーザーの指示かどうか。ツール結果やシステム由来の行は除く。"""
     if entry.get("type") != "user" or entry.get("isMeta"):
@@ -864,6 +909,12 @@ class PromptCounter:
         rec = self.state.get(sid)
         return rec["count"] if rec and rec.get("path") else None
 
+    def activity(self, a):
+        """直近のツール実行の説明（いま何をしているか）。なければ None。"""
+        sid = ((a.get("agent_session") or {}).get("value")) or ""
+        rec = self.state.get(sid)
+        return rec.get("activity") if rec else None
+
     def last_activity(self, a):
         """会話ログの最終記録時刻（unix 秒）。なければ None。"""
         sid = ((a.get("agent_session") or {}).get("value")) or ""
@@ -888,7 +939,7 @@ class PromptCounter:
     def _update(self, sids):
         try:
             for sid in sids:
-                rec = self.state.setdefault(sid, {"path": None, "offset": 0, "count": 0, "buf": b"", "looked": 0.0, "last_ts": None})
+                rec = self.state.setdefault(sid, {"path": None, "offset": 0, "count": 0, "buf": b"", "looked": 0.0, "last_ts": None, "activity": None})
                 if rec["path"] is None:
                     if time.monotonic() - rec["looked"] < 30:
                         continue
@@ -922,6 +973,10 @@ class PromptCounter:
                         rec["last_ts"] = ts
                     if is_user_prompt(entry):
                         added += 1
+                        rec["activity"] = None  # 新しい依頼が来たら前の作業の説明は消す
+                    act = tool_activity(entry)
+                    if act:
+                        rec["activity"] = act
                 rec["count"] += added
         finally:
             with self.lock:
