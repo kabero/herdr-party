@@ -970,41 +970,50 @@ def is_user_prompt(entry):
     return False
 
 
+def project_dir_for(cwd):
+    """Claude Code がその cwd の会話ログを置くディレクトリ。英数字以外は - に置き換えられる。"""
+    if not cwd:
+        return None
+    return os.path.join(CLAUDE_PROJECTS, re.sub(r"[^A-Za-z0-9]", "-", cwd))
+
+
 class PromptCounter:
-    """セッション ID から Claude Code の会話ログ（JSONL）を見つけ、指示の回数を差分で数える。"""
+    """各 guest の Claude Code の会話ログ（JSONL）を見つけ、指示の回数・最後のプロンプト・返答を差分で読む。
+
+    ログはセッション ID で探す。Herdr がセッション ID を持っていない guest（連携フックが古い、など）は、
+    cwd に対応するログ置き場から、他の guest が使っていない最新のログを割り当てる。
+    """
 
     def __init__(self):
         self.lock = threading.Lock()
-        self.state = {}   # session_id -> {"path", "offset", "count", "buf", "looked"}
+        self.state = {}   # guest key -> {"sid", "cwd", "path", "offset", "count", "buf", "looked", ...}
         self.busy = False
 
+    def _rec(self, a):
+        return self.state.get(guest_key(a))
+
     def get(self, a):
-        sid = ((a.get("agent_session") or {}).get("value")) or ""
-        rec = self.state.get(sid)
+        rec = self._rec(a)
         return rec["count"] if rec and rec.get("path") else None
 
     def last_prompt(self, a):
         """最後に投げたプロンプト（1 行目）。なければ None。"""
-        sid = ((a.get("agent_session") or {}).get("value")) or ""
-        rec = self.state.get(sid)
+        rec = self._rec(a)
         return rec.get("last_prompt") if rec else None
 
     def last_reply(self, a):
         """最後の返答の冒頭。なければ None。"""
-        sid = ((a.get("agent_session") or {}).get("value")) or ""
-        rec = self.state.get(sid)
+        rec = self._rec(a)
         return rec.get("last_reply") if rec else None
 
     def activity(self, a):
         """直近のツール実行の説明（いま何をしているか）。なければ None。"""
-        sid = ((a.get("agent_session") or {}).get("value")) or ""
-        rec = self.state.get(sid)
+        rec = self._rec(a)
         return rec.get("activity") if rec else None
 
     def last_activity(self, a):
         """会話ログの最終記録時刻（unix 秒）。なければ None。"""
-        sid = ((a.get("agent_session") or {}).get("value")) or ""
-        rec = self.state.get(sid)
+        rec = self._rec(a)
         ts = rec.get("last_ts") if rec else None
         if not ts:
             return None
@@ -1013,27 +1022,50 @@ class PromptCounter:
         except ValueError:
             return None
 
-
     def refresh(self, agents):
         with self.lock:
             if self.busy:
                 return
             self.busy = True
-        sids = [((a.get("agent_session") or {}).get("value")) or "" for a in agents]
-        threading.Thread(target=self._update, args=([sid for sid in sids if sid],), daemon=True).start()
+        todo = []
+        for a in agents:
+            key = guest_key(a)
+            if not key:
+                continue
+            sid = ((a.get("agent_session") or {}).get("value")) or None
+            todo.append((key, sid, a.get("cwd") or a.get("foreground_cwd") or ""))
+        threading.Thread(target=self._update, args=(todo,), daemon=True).start()
 
-    def _update(self, sids):
+    def _resolve_path(self, key, sid, cwd):
+        """ログのパスを決める。セッション ID があればそれで、なければ cwd から未使用の最新を選ぶ。"""
+        if sid:
+            hits = glob.glob(os.path.join(CLAUDE_PROJECTS, "*", sid + ".jsonl"))
+            return hits[0] if hits else None
+        pdir = project_dir_for(cwd)
+        if not pdir or not os.path.isdir(pdir):
+            return None
+        taken = {r["path"] for k, r in self.state.items() if k != key and r.get("path")}
+        candidates = [f for f in glob.glob(os.path.join(pdir, "*.jsonl")) if f not in taken]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda f: os.path.getmtime(f))
+
+    def _update(self, todo):
         try:
-            for sid in sids:
-                rec = self.state.setdefault(sid, {"path": None, "offset": 0, "count": 0, "buf": b"", "looked": 0.0, "last_ts": None, "activity": None, "last_prompt": None, "last_reply": None})
+            for key, sid, cwd in todo:
+                rec = self.state.setdefault(key, {"sid": sid, "cwd": cwd, "path": None, "offset": 0, "count": 0, "buf": b"",
+                                                  "looked": 0.0, "last_ts": None, "activity": None, "last_prompt": None, "last_reply": None})
+                if sid and rec.get("sid") != sid:
+                    # あとからセッション ID が分かった: そのログで読み直す
+                    rec.update({"sid": sid, "path": None, "offset": 0, "count": 0, "buf": b"", "looked": 0.0,
+                                "last_ts": None, "activity": None, "last_prompt": None, "last_reply": None})
                 if rec["path"] is None:
                     if time.monotonic() - rec["looked"] < 30:
                         continue
                     rec["looked"] = time.monotonic()
-                    hits = glob.glob(os.path.join(CLAUDE_PROJECTS, "*", sid + ".jsonl"))
-                    if not hits:
+                    rec["path"] = self._resolve_path(key, sid, cwd)
+                    if rec["path"] is None:
                         continue
-                    rec["path"] = hits[0]
                 try:
                     with open(rec["path"], "rb") as f:
                         f.seek(rec["offset"])
@@ -1072,7 +1104,6 @@ class PromptCounter:
         finally:
             with self.lock:
                 self.busy = False
-
 
 
 # ---------- 文脈スニペット（頼んだこと・応答・承認待ちの内容） ----------
