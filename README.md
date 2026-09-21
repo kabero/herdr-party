@@ -55,6 +55,12 @@ What the plugin provides:
 | pane | `party` | Opens as a Herdr-managed pane (`herdr plugin pane open --plugin kabe.herdr-party --entrypoint party --placement split`) |
 | pane | `peek` | Peeks at the party in a popup (`--entrypoint peek`, close with `q`) |
 
+## Requirements
+
+- Herdr 0.9.1 or later. On 0.9.0 the client can pull you back after a click-to-jump; the viewer works around it, but 0.9.1 fixes it properly. Check with `herdr --version`, update with `herdr update`.
+- Herdr's Claude integration installed and current. It is the hook that tells Herdr each session's ID, which the viewer uses to find that session's conversation log for prompt counts, prompts, and replies. Check with `herdr integration status`; if it says `claude: outdated`, run `herdr integration install claude` (it updates `~/.claude/hooks/herdr-agent-state.sh` and the hook entries in `~/.claude/settings.json`; sessions started afterwards report their ID). Without a session ID the viewer falls back to matching the pane's on-screen prompt against logs in the cwd's log directory, and shows nothing when unsure.
+- Claude Code conversation logs under `~/.claude/projects/` (the default location).
+
 ## Usage
 
 You can also run it directly inside a Herdr pane (`HERDR_ENV=1`) without the plugin:

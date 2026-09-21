@@ -55,6 +55,12 @@ description = "party pane"
 | pane | `party` | Herdr 管理のペインとして開く（`herdr plugin pane open --plugin kabe.herdr-party --entrypoint party --placement split`） |
 | pane | `peek` | ポップアップで会場を覗く（`--entrypoint peek`、`q` で閉じる） |
 
+## 前提
+
+- Herdr 0.9.1 以降。0.9.0 ではクリックで飛んだ直後にクライアントが引き戻すことがあります。ビューア側で回避していますが、0.9.1 で根本的に直っています。`herdr --version` で確認し、`herdr update` で更新できます。
+- Herdr の Claude 連携（integration）が入っていて最新であること。この連携フックが各セッションの ID を Herdr に伝え、ビューアはその ID で会話ログを見つけて指示回数・プロンプト・返答を出します。`herdr integration status` で確認し、`claude: outdated` と出たら `herdr integration install claude` を実行してください（`~/.claude/hooks/herdr-agent-state.sh` と `~/.claude/settings.json` のフック設定が更新され、以後に起動したセッションから ID が届きます）。ID がないセッションは、ペインの画面に出ているプロンプトと cwd のログ置き場のログを突き合わせて推測し、確信がなければ何も出しません。
+- Claude Code の会話ログが `~/.claude/projects/` にあること（既定の場所）。
+
 ## 使い方
 
 プラグインを使わずに、Herdr のペイン内（`HERDR_ENV=1`）で直接実行することもできます。
