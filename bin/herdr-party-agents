@@ -1065,6 +1065,73 @@ def project_dir_for(cwd):
     return os.path.join(CLAUDE_PROJECTS, re.sub(r"[^A-Za-z0-9]", "-", cwd))
 
 
+def process_start_time(pane_id):
+    """ペインの前面プロセス（claude）の起動時刻（unix 秒）。取れなければ None。"""
+    info = herdr("pane", "process-info", "--pane", pane_id)
+    procs = (((info or {}).get("result") or {}).get("process_info") or {}).get("foreground_processes") or []
+    pid = procs[0].get("pid") if procs else None
+    if not pid:
+        return None
+    try:
+        out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=5).stdout.strip()
+        return time.mktime(time.strptime(out, "%a %b %d %H:%M:%S %Y")) if out else None
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
+def screen_last_prompt(pane_id):
+    """ペインの画面に出ている最後のプロンプト（❯ 行）。なければ None。"""
+    text = herdr_text("agent", "read", pane_id, "--source", "recent-unwrapped", "--lines", "200")
+    last = None
+    for line in text.splitlines():
+        t = line.strip()
+        if t.startswith("❯ ") and len(t) > 2:
+            last = t[2:].strip()
+    return last
+
+
+def log_last_prompt(path):
+    """会話ログの最後のユーザー発言（1 行目）。なければ None。"""
+    last = None
+    try:
+        with open(path, "rb") as f:
+            for line in f:
+                if b'"type":"user"' not in line and b'"type": "user"' not in line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if is_user_prompt(entry):
+                    last = prompt_text(entry)
+    except OSError:
+        return None
+    return last
+
+
+def norm_prompt(s):
+    return re.sub(r"\s+", " ", (s or "").strip())[:40]
+
+
+def log_first_time(path):
+    """会話ログの最初の記録時刻（unix 秒）。取れなければ None。"""
+    try:
+        with open(path, "rb") as f:
+            for _ in range(20):
+                line = f.readline()
+                if not line:
+                    break
+                try:
+                    ts = json.loads(line).get("timestamp")
+                except ValueError:
+                    continue
+                if isinstance(ts, str):
+                    return datetime.datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+    except OSError:
+        pass
+    return None
+
+
 class PromptCounter:
     """各 guest の Claude Code の会話ログ（JSONL）を見つけ、指示の回数・最後のプロンプト・返答を差分で読む。
 
@@ -1121,37 +1188,64 @@ class PromptCounter:
             if not key:
                 continue
             sid = ((a.get("agent_session") or {}).get("value")) or None
-            todo.append((key, sid, a.get("cwd") or a.get("foreground_cwd") or ""))
+            todo.append((key, sid, a.get("cwd") or a.get("foreground_cwd") or "", a.get("pane_id")))
         threading.Thread(target=self._update, args=(todo,), daemon=True).start()
 
-    def _resolve_path(self, key, sid, cwd):
-        """ログのパスを決める。セッション ID があればそれで、なければ cwd から未使用の最新を選ぶ。"""
+    def _resolve_path(self, key, sid, cwd, pane_id=None, rec=None):
+        """ログのパスを決める。セッション ID があればそれで決まる。
+
+        なければ cwd のログ置き場から選ぶが、そのペインの claude プロセスの起動より前に
+        始まったログは古いセッションのものなので候補から外す。該当がなければ None。
+        """
         if sid:
             hits = glob.glob(os.path.join(CLAUDE_PROJECTS, "*", sid + ".jsonl"))
             return hits[0] if hits else None
         pdir = project_dir_for(cwd)
         if not pdir or not os.path.isdir(pdir):
             return None
+        started = None
+        if rec is not None:
+            if rec.get("started") is None and pane_id:
+                rec["started"] = process_start_time(pane_id) or 0.0
+            started = rec.get("started") or None
         taken = {r["path"] for k, r in self.state.items() if k != key and r.get("path")}
-        candidates = [f for f in glob.glob(os.path.join(pdir, "*.jsonl")) if f not in taken]
-        if not candidates:
+        candidates = []
+        for f in glob.glob(os.path.join(pdir, "*.jsonl")):
+            if f in taken:
+                continue
+            if started and (log_first_time(f) or 0) < started - 120:
+                continue  # プロセス起動より前に始まったログ = 別の（古い）セッション
+            candidates.append(f)
+        if not candidates or not pane_id:
             return None
-        return max(candidates, key=lambda f: os.path.getmtime(f))
+        # 決め手: 画面に出ている最後のプロンプトと、ログの最後のユーザー発言が一致すること
+        want = norm_prompt(screen_last_prompt(pane_id))
+        if not want:
+            return None  # まだ何も頼んでいない（ログもまだ無い）
+        matches = [f for f in candidates if norm_prompt(log_last_prompt(f)) == want]
+        if not matches:
+            return None
+        return max(matches, key=lambda f: os.path.getmtime(f))
 
     def _update(self, todo):
         try:
-            for key, sid, cwd in todo:
-                rec = self.state.setdefault(key, {"sid": sid, "cwd": cwd, "path": None, "offset": 0, "count": 0, "buf": b"",
-                                                  "looked": 0.0, "last_ts": None, "activity": None, "last_prompt": None, "last_reply": None})
+            for key, sid, cwd, pane_id in todo:
+                rec = self.state.setdefault(key, {"sid": sid, "cwd": cwd, "pane_id": pane_id, "path": None, "offset": 0, "count": 0, "buf": b"",
+                                                  "looked": 0.0, "last_ts": None, "activity": None, "last_prompt": None, "last_reply": None, "started": None})
+                rec["pane_id"] = pane_id
                 if sid and rec.get("sid") != sid:
                     # あとからセッション ID が分かった: そのログで読み直す
                     rec.update({"sid": sid, "path": None, "offset": 0, "count": 0, "buf": b"", "looked": 0.0,
                                 "last_ts": None, "activity": None, "last_prompt": None, "last_reply": None})
-                if rec["path"] is None:
-                    if time.monotonic() - rec["looked"] < 30:
+                if rec["path"] is None or (not sid and time.monotonic() - rec["looked"] >= 30):
+                    if rec["path"] is None and time.monotonic() - rec["looked"] < 30:
                         continue
                     rec["looked"] = time.monotonic()
-                    rec["path"] = self._resolve_path(key, sid, cwd)
+                    found = self._resolve_path(key, sid, cwd, pane_id=rec.get("pane_id"), rec=rec)
+                    if found != rec["path"]:
+                        # 割り当てが変わった（新しいセッションのログができた、など）: 読み直す
+                        rec.update({"path": found, "offset": 0, "count": 0, "buf": b"", "last_ts": None,
+                                    "activity": None, "last_prompt": None, "last_reply": None})
                     if rec["path"] is None:
                         continue
                 try:
